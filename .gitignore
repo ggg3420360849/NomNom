@@ -22,3 +22,13 @@
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+
+# --- JavaScript / Node 规则 ---
+node_modules/      # 极其重要！这个文件夹绝对不要上传，太大了
+dist/              # 打包后的前端文件
+.env               # 存放密钥的文件，不要公开
+
+# --- 数据库规则 ---
+*.db
+*.sqlite3
+/backup/*.sql      # 备份文件不要传
