@@ -18,3 +18,4 @@ INSERT INTO menu (name, price, category, description) VALUES
 ('拍黄瓜', 15.00, '凉菜', '清脆爽口'),
 ('扬州炒饭', 22.00, '主食', '粒粒金黄'),
 ('冰可乐', 5.00, '饮料', '330ml 罐装');
+
