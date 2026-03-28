@@ -32,3 +32,13 @@ dist/              # 打包后的前端文件
 *.db
 *.sqlite3
 /backup/*.sql      # 备份文件不要传
+
+# --- Maven 编译产物 ---
+target/
+*.class
+
+# --- IDEA 个人配置文件 ---
+.idea/
+*.iml
+out/
+gen/
