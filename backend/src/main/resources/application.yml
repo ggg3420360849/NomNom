@@ -1,0 +1,15 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: nomnom-backend
+  datasource:
+    url: ${NOMNOM_DB_URL:jdbc:mysql://localhost:3306/nomnom?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${NOMNOM_DB_USERNAME:root}
+    password: ${NOMNOM_DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
