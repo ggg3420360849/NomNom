@@ -4,7 +4,7 @@ public class test {
     public static void main(String[] args) {
         String url = "jdbc:mysql://localhost:3306/nomnom";
         String user = "root";
-        String password = "自己的数据库密码"; // 这里一定要改成你真实的密码
+        String password = "你的数据库密码"; // 这里一定要改成你真实的密码
 
         try (Connection conn = DriverManager.getConnection(url, user, password)) {
             System.out.println("数据库连接成功！正在读取菜单...");
