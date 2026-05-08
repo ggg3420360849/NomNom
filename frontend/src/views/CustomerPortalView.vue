@@ -1,4 +1,5 @@
 <script setup>
+import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import MetricStrip from '../components/MetricStrip.vue'
 import PortalHeader from '../components/PortalHeader.vue'
@@ -13,7 +14,9 @@ async function exitPortal() {
   await router.push('/login')
 }
 
-await app.loadPortalData()
+onMounted(() => {
+  app.loadPortalData()
+})
 </script>
 
 <template>

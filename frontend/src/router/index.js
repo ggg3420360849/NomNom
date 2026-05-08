@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory, createWebHistory } from 'vue-router'
 import AuthView from '../views/AuthView.vue'
 import CustomerPortalView from '../views/CustomerPortalView.vue'
 import MerchantPortalView from '../views/MerchantPortalView.vue'
@@ -51,7 +51,7 @@ const routes = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: window.location.protocol === 'file:' ? createWebHashHistory() : createWebHistory(),
   routes,
 })
 
