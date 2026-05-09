@@ -246,4 +246,4 @@ insert into user (id, account, username, password, avatar, email, role, gender, 
 values (1, '123456', 'aaa', '123456', null, null, 1, null, null, null, '2026-05-08 21:00:11');
 
 insert into user (id, account, username, password, avatar, email, role, gender, birthday, phone, create_time)
-values (2, '1234567', 'bbb', '1234567', null, null, 1, null, null, null, '2026-05-08 21:00:24');
+values (2, '1234567', 'bbb', '1234567', null, null, 2, null, null, null, '2026-05-08 21:00:24');
