@@ -5,7 +5,7 @@ create table collection
     user_id   int null comment '用户ID，外键，关联用户表',
     dishes_id int null comment '菜品ID，外键，关联菜品表'
 )
-    comment '菜品收藏表';
+    comment '菜品收藏表' charset = utf8mb4;
 
 create index idx_user_dishes_id
     on collection (user_id, dishes_id)
@@ -22,7 +22,7 @@ create table dishes
     status      tinyint(1)   null comment '菜品状态（0：下架状态；1：上架状态）',
     create_time datetime     null comment '菜品创建时间'
 )
-    comment '菜品信息表';
+    comment '菜品信息表' charset = utf8mb4;
 
 create index idx_type_id
     on dishes (type_id)
@@ -41,7 +41,7 @@ create table dishes_evaluations
     reply_status  tinyint(1) null comment '回复状态（0：未回复；1：已回复）',
     create_time   datetime   null comment '创建时间'
 )
-    comment '菜品评价表';
+    comment '菜品评价表' charset = utf8mb4;
 
 create index idx_dishes_id
     on dishes_evaluations (dishes_id)
@@ -65,7 +65,7 @@ create table dishes_package
     price       decimal(10, 2) null comment '价格',
     create_time datetime       null comment '创建时间'
 )
-    comment '菜品套餐信息表';
+    comment '菜品套餐信息表' charset = utf8mb4;
 
 create index idx_dishes_id
     on dishes_package (dishes_id)
@@ -80,7 +80,7 @@ create table dishes_table
     status        tinyint(1)  null comment '状态',
     create_time   datetime    null comment '创建时间'
 )
-    comment '餐桌信息表';
+    comment '餐桌信息表' charset = utf8mb4;
 
 create table dishes_type
 (
@@ -89,7 +89,7 @@ create table dishes_type
     icon_uri varchar(255) null comment '图标URL路径',
     name     varchar(30)  null comment '菜品种类'
 )
-    comment '菜品种类信息表';
+    comment '菜品种类信息表' charset = utf8mb4;
 
 create table images
 (
@@ -99,7 +99,7 @@ create table images
     picture_url           varchar(255) null comment '图片的URL路径',
     number                int          null comment '排序序号'
 )
-    comment '菜品评论图片表';
+    comment '菜品评论图片表' charset = utf8mb4;
 
 create index idx_dishes_evaluations_id
     on images (dishes_evaluations_id)
@@ -115,7 +115,7 @@ create table messages
     read_status tinyint(1)   null comment '阅读状态（0：未读；1：已读）',
     create_time datetime     null comment '通知时间'
 )
-    comment '消息通知表';
+    comment '消息通知表' charset = utf8mb4;
 
 create index idx_user_id
     on messages (user_id)
@@ -133,7 +133,7 @@ create table orders
     pay_time        datetime       null comment '支付时间',
     create_time     datetime       null comment '创建时间'
 )
-    comment '订单信息表';
+    comment '订单信息表' charset = utf8mb4;
 
 create index idx_user_id
     on orders (user_id)
@@ -152,7 +152,7 @@ create table orders_item
     total_price       decimal(10, 2) null comment '价格(快照价格*购买数量)',
     create_time       datetime       null comment '创建时间'
 )
-    comment '订单项';
+    comment '订单项' charset = utf8mb4;
 
 create index idx_orders_id
     on orders_item (orders_id)
@@ -169,7 +169,7 @@ create table orders_refund_reply
     create_time         datetime     null comment '创建时间',
     refun_time          datetime     null comment '退款时间'
 )
-    comment '订单退款申请表';
+    comment '订单退款申请表' charset = utf8mb4;
 
 create index idx_orders_id
     on orders_refund_reply (orders_id)
@@ -185,7 +185,7 @@ create table shopping_car
     is_seleced        tinyint(1) not null comment '是否选中',
     create_time       datetime   null comment '创建时间'
 )
-    comment '购物车信息表';
+    comment '购物车信息表' charset = utf8mb4;
 
 create index idx_user_id
     on shopping_car (user_id)
@@ -219,7 +219,7 @@ create table wallet
     type        tinyint(1)     null comment '钱包类型（1：私人钱包；2：商家钱包）',
     surplus     decimal(10, 2) null comment '余额'
 )
-    comment '钱包信息表';
+    comment '钱包信息表' charset = utf8mb4;
 
 create index idx_user_id
     on wallet (user_id)
@@ -234,8 +234,16 @@ create table wallet_info
     detail        varchar(255)   null comment '描述',
     surplus_money decimal(10, 2) null comment '钱包资金走向'
 )
-    comment '钱包明细表';
+    comment '钱包明细表' charset = utf8mb4;
 
 create index idex_wallet_id
     on wallet_info (wallet_id)
     comment '索引-钱包ID';
+
+
+
+insert into user (id, account, username, password, avatar, email, role, gender, birthday, phone, create_time)
+values (1, '123456', 'aaa', '123456', null, null, 1, null, null, null, '2026-05-08 21:00:11');
+
+insert into user (id, account, username, password, avatar, email, role, gender, birthday, phone, create_time)
+values (2, '1234567', 'bbb', '1234567', null, null, 1, null, null, null, '2026-05-08 21:00:24');
