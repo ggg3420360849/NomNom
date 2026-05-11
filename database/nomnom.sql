@@ -247,3 +247,13 @@ values (1, '123456', 'aaa', '123456', null, null, 1, null, null, null, '2026-05-
 
 insert into user (id, account, username, password, avatar, email, role, gender, birthday, phone, create_time)
 values (2, '1234567', 'bbb', '1234567', null, null, 1, null, null, null, '2026-05-08 21:00:24');
+
+-- 1. 升级桌台表：增加区域、当前消费金额、最低消费
+ALTER TABLE dishes_table ADD COLUMN area VARCHAR(50) COMMENT '所属区域：大厅/包间/二楼等';
+ALTER TABLE dishes_table ADD COLUMN amount DECIMAL(10, 2) DEFAULT 0.00 COMMENT '当前桌台消费总额';
+ALTER TABLE dishes_table ADD COLUMN min_spend DECIMAL(10, 2) DEFAULT 0.00 COMMENT '最低消费(主要针对包间)';
+
+-- 2. 升级菜品表：增加库存、会员价、多规格JSON配置
+ALTER TABLE dishes ADD COLUMN stock INT DEFAULT 999 COMMENT '库存数量';
+ALTER TABLE dishes ADD COLUMN member_price DECIMAL(10, 2) COMMENT '会员特价';
+ALTER TABLE dishes ADD COLUMN specs TEXT COMMENT '菜品规格口味，存储为JSON字符串';

@@ -1,3 +1,8 @@
+import axios from 'axios';
+
+// ==========================================
+// 1. 原本系统自带的 fetch 请求封装 (供顾客端等使用)
+// ==========================================
 async function request(url, options = {}) {
   let response
   try {
@@ -13,8 +18,8 @@ async function request(url, options = {}) {
   }
 
   const result = await response
-    .json()
-    .catch(() => ({ success: false, message: `HTTP ${response.status}` }))
+      .json()
+      .catch(() => ({ success: false, message: `HTTP ${response.status}` }))
 
   if (!response.ok || result.success === false) {
     throw new Error(result.message || `HTTP ${response.status}`)
@@ -63,3 +68,26 @@ export function createOrder(payload) {
     body: JSON.stringify(payload),
   })
 }
+
+
+// ==========================================
+// 2. 新增的 Axios 商家端请求封装 (供咱们新写的商家页面使用)
+// ==========================================
+// 为了防止名字冲突，这里命名为 axiosRequest
+const axiosRequest = axios.create({ baseURL: '/api' });
+
+export const merchantApi = {
+  // 上传图片
+  uploadFile: (formData) => axiosRequest.post('/common/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+
+  // 菜品操作
+  addDish: (data) => axiosRequest.post('/admin/dishes/add', data),
+
+  // 桌台操作
+  getTables: () => axiosRequest.get('/admin/tables'),
+  updateTableStatus: (tableId, status) => axiosRequest.put('/admin/tables/status', null, {
+    params: { tableId, status }
+  })
+};
