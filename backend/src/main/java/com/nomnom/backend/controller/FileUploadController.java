@@ -12,8 +12,7 @@ import java.util.UUID;
 @RequestMapping("/api/common")
 public class FileUploadController {
 
-    // 图片保存的物理路径
-    private String uploadPath = "D:/nomnom_uploads/";
+    private static final String UPLOAD_PATH = "D:/CODE/projects/ordersystem/backend/uploads/";
 
     @PostMapping("/upload")
     public ApiResponse<String> upload(@RequestParam("file") MultipartFile file) {
@@ -22,7 +21,7 @@ public class FileUploadController {
         }
 
         String fileName = UUID.randomUUID() + "_" + file.getOriginalFilename();
-        File dest = new File(uploadPath + fileName);
+        File dest = new File(UPLOAD_PATH + fileName);
 
         try {
             if (!dest.getParentFile().exists()) dest.getParentFile().mkdirs();

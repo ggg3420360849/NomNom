@@ -1,11 +1,13 @@
 package com.nomnom.backend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.nomnom.backend.common.JwtUtils;
 import com.nomnom.backend.entity.UserEntity;
 import com.nomnom.backend.mapper.UserMapper;
 import com.nomnom.backend.model.AuthUser;
 import com.nomnom.backend.model.LoginRequest;
 import com.nomnom.backend.model.RegisterRequest;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,9 +20,13 @@ public class AuthService {
     private static final int ROLE_MERCHANT = 2;
 
     private final UserMapper userMapper;
+    private final BCryptPasswordEncoder passwordEncoder;
+    private final JwtUtils jwtUtils;
 
-    public AuthService(UserMapper userMapper) {
+    public AuthService(UserMapper userMapper, BCryptPasswordEncoder passwordEncoder, JwtUtils jwtUtils) {
         this.userMapper = userMapper;
+        this.passwordEncoder = passwordEncoder;
+        this.jwtUtils = jwtUtils;
     }
 
     public AuthUser login(LoginRequest request) {
@@ -33,7 +39,7 @@ public class AuthService {
         if (user == null) {
             throw new IllegalArgumentException("账号不存在。");
         }
-        if (!user.getPassword().equals(request.getPassword())) {
+        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new IllegalArgumentException("密码错误。");
         }
 
@@ -59,7 +65,7 @@ public class AuthService {
         UserEntity user = new UserEntity();
         user.setAccount(request.getAccount().trim());
         user.setUsername(resolveUsername(request));
-        user.setPassword(request.getPassword());
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setEmail(normalizeNullable(request.getEmail()));
         user.setPhone(normalizeNullable(request.getPhone()));
         user.setRole(resolveRoleValue(request.getRoleCode()));
@@ -115,15 +121,18 @@ public class AuthService {
     }
 
     private AuthUser toAuthUser(UserEntity user) {
+        String roleCode = user.getRole() != null && user.getRole() == ROLE_MERCHANT ? "MERCHANT" : "CUSTOMER";
+
         AuthUser authUser = new AuthUser();
         authUser.setId(user.getId());
         authUser.setAccount(user.getAccount());
         authUser.setUsername(user.getUsername());
         authUser.setRole(user.getRole());
-        authUser.setRoleCode(user.getRole() != null && user.getRole() == ROLE_MERCHANT ? "MERCHANT" : "CUSTOMER");
+        authUser.setRoleCode(roleCode);
         authUser.setRoleLabel(user.getRole() != null && user.getRole() == ROLE_MERCHANT ? "商家端" : "顾客端");
         authUser.setEmail(user.getEmail());
         authUser.setPhone(user.getPhone());
+        authUser.setToken(jwtUtils.generateToken(user.getId(), user.getAccount(), user.getRole(), roleCode));
         return authUser;
     }
 }

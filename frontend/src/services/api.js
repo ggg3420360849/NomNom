@@ -1,20 +1,49 @@
 import axios from 'axios';
 
+const STORAGE_KEY = 'nomnom-auth-user'
+
+function getToken() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    const user = JSON.parse(raw)
+    return user?.token || null
+  } catch {
+    return null
+  }
+}
+
+function clearAuthAndRedirect() {
+  localStorage.removeItem(STORAGE_KEY)
+  window.location.hash = '#/login'
+}
+
 // ==========================================
-// 1. 原本系统自带的 fetch 请求封装 (供顾客端等使用)
+// 1. fetch 请求封装 (供顾客端使用)
 // ==========================================
 async function request(url, options = {}) {
+  const token = getToken()
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(options.headers || {}),
+  }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
   let response
   try {
     response = await fetch(url, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(options.headers || {}),
-      },
+      headers,
       ...options,
     })
   } catch {
     throw new Error('无法连接到服务器。请先确认前端开发服务 http://localhost:5173 和后端接口 http://localhost:8080 已启动。')
+  }
+
+  if (response.status === 401) {
+    clearAuthAndRedirect()
+    throw new Error('登录已过期，请重新登录')
   }
 
   const result = await response
@@ -71,23 +100,56 @@ export function createOrder(payload) {
 
 
 // ==========================================
-// 2. 新增的 Axios 商家端请求封装 (供咱们新写的商家页面使用)
+// 2. Axios 商家端请求封装
 // ==========================================
-// 为了防止名字冲突，这里命名为 axiosRequest
-const axiosRequest = axios.create({ baseURL: '/api' });
+const axiosRequest = axios.create({ baseURL: '/api' })
+
+axiosRequest.interceptors.request.use((config) => {
+  const token = getToken()
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+axiosRequest.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      if (error.response?.status === 401) {
+        clearAuthAndRedirect()
+      }
+      return Promise.reject(error)
+    }
+)
 
 export const merchantApi = {
-  // 上传图片
   uploadFile: (formData) => axiosRequest.post('/common/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
 
-  // 菜品操作
+  getDishes: () => axiosRequest.get('/admin/dishes'),
   addDish: (data) => axiosRequest.post('/admin/dishes/add', data),
+  updateDish: (id, data) => axiosRequest.put(`/admin/dishes/${id}`, data),
+  updateDishStatus: (id, status) => axiosRequest.put(`/admin/dishes/${id}/status`, null, {
+    params: { status }
+  }),
+  deleteDish: (id) => axiosRequest.delete(`/admin/dishes/${id}`),
 
-  // 桌台操作
+  getCategories: (keyword) => axiosRequest.get('/admin/categories', { params: keyword ? { keyword } : {} }),
+  addCategory: (data) => axiosRequest.post('/admin/categories', data),
+  updateCategory: (id, data) => axiosRequest.put(`/admin/categories/${id}`, data),
+  deleteCategory: (id) => axiosRequest.delete(`/admin/categories/${id}`),
+
+  getOrders: (status) => axiosRequest.get('/admin/orders', { params: status != null ? { status } : {} }),
+  updateOrderStatus: (id, status) => axiosRequest.put(`/admin/orders/${id}/status`, null, {
+    params: { status }
+  }),
+
   getTables: () => axiosRequest.get('/admin/tables'),
+  addTable: (data) => axiosRequest.post('/admin/tables', data),
+  updateTable: (id, data) => axiosRequest.put(`/admin/tables/${id}`, data),
+  deleteTable: (id) => axiosRequest.delete(`/admin/tables/${id}`),
   updateTableStatus: (tableId, status) => axiosRequest.put('/admin/tables/status', null, {
     params: { tableId, status }
   })
-};
+}

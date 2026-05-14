@@ -1,15 +1,29 @@
 package com.nomnom.backend.config;
 
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
+
+    private final JwtInterceptor jwtInterceptor;
+
+    public WebConfig(JwtInterceptor jwtInterceptor) {
+        this.jwtInterceptor = jwtInterceptor;
+    }
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(jwtInterceptor)
+                .addPathPatterns("/api/orders/**", "/api/admin/**", "/api/common/**")
+                .excludePathPatterns();
+    }
+
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // 将浏览器的 /uploads/** 请求映射到硬盘的 D:/nomnom_uploads/ 文件夹
         registry.addResourceHandler("/uploads/**")
-                .addResourceLocations("file:D:/nomnom_uploads/");
+                .addResourceLocations("file:D:/CODE/projects/ordersystem/backend/uploads/");
     }
 }

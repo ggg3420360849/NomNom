@@ -242,11 +242,14 @@ create index idex_wallet_id
 
 
 
+-- 种子用户数据 (密码已使用 BCrypt 加密)
+-- 账号 123456 / 密码 123456 (顾客)
 insert into user (id, account, username, password, avatar, email, role, gender, birthday, phone, create_time)
-values (1, '123456', 'aaa', '123456', null, null, 1, null, null, null, '2026-05-08 21:00:11');
+values (1, '123456', 'aaa', '$2b$10$9FOQgf7wwoVm7tRWNdtoyOA/YsHUk9bcKS/fxAvsLAk5D9ZoQZdRS', null, null, 1, null, null, null, '2026-05-08 21:00:11');
 
+-- 账号 1234567 / 密码 1234567 (顾客)
 insert into user (id, account, username, password, avatar, email, role, gender, birthday, phone, create_time)
-values (2, '1234567', 'bbb', '1234567', null, null, 1, null, null, null, '2026-05-08 21:00:24');
+values (2, '1234567', 'bbb', '$2b$10$wxW1d5pgB.QmGpuA6N4RH.o7rZLmYHmTzMCzO5UB0qOPNAHX4bLcG', null, null, 1, null, null, null, '2026-05-08 21:00:24');
 
 -- 1. 升级桌台表：增加区域、当前消费金额、最低消费
 ALTER TABLE dishes_table ADD COLUMN area VARCHAR(50) COMMENT '所属区域：大厅/包间/二楼等';

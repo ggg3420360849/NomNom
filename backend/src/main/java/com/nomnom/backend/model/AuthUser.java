@@ -10,6 +10,7 @@ public class AuthUser {
     private String roleLabel;
     private String email;
     private String phone;
+    private String token;
 
     public Long getId() {
         return id;
@@ -73,5 +74,13 @@ public class AuthUser {
 
     public void setPhone(String phone) {
         this.phone = phone;
+    }
+
+    public String getToken() {
+        return token;
+    }
+
+    public void setToken(String token) {
+        this.token = token;
     }
 }

@@ -3,12 +3,15 @@ package com.nomnom.backend.entity;
 import java.math.BigDecimal;
 import java.util.Date;
 
-/**
- * 菜品实体类，与数据库中的 dishes 表对应
- */
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+
+@TableName("dishes")
 public class DishesEntity {
 
-    private Integer id;             // 主键ID
+    @TableId(type = IdType.AUTO)
+    private Integer id;
     private Integer typeId;         // 菜品分类ID
     private String name;            // 菜品名称
     private String detail;          // 菜品详情

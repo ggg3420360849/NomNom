@@ -9,8 +9,23 @@ const router = useRouter()
 const app = useNomNomApp()
 
 // --- 顶级路由与子页签控制 ---
-const currentMenu = ref('B02') // 默认进入桌台管理
-const subTab = ref('layout')   // B01: list/category; B02: layout/area/booking
+const currentMenu = ref(localStorage.getItem('adminTab') || 'B02')
+const subTab = ref('layout')
+
+function switchTab(tab) {
+  currentMenu.value = tab
+  localStorage.setItem('adminTab', tab)
+  if (tab === 'B03') fetchOrders()
+}
+
+// --- Toast 提示（替代 alert） ---
+const toast = ref('')
+let toastTimer = null
+function showToast(msg) {
+  toast.value = msg
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toast.value = '' }, 2000)
+}
 
 // --- 模拟状态数据映射 (已调整为更柔和的颜色) ---
 const TABLE_STATUS = {
@@ -24,14 +39,43 @@ const TABLE_STATUS = {
 }
 
 // --- 桌台数据与交互 ---
-const tableAreas = ['大厅', '一楼', '二楼', 'VIP包间']
 const selectedArea = ref('全部')
-const tableList = ref([
-  { id: 1, number: 'A01', name: '双人桌', seats: 2, area: '大厅', status: 0, amount: 0 },
-  { id: 2, number: 'A02', name: '双人桌', seats: 2, area: '大厅', status: 2, amount: 158.50 },
-  { id: 3, number: 'V08', name: '豪华包厢', seats: 12, area: 'VIP包间', status: 5, amount: 0, minSpend: 800 },
-  { id: 4, number: 'B01', name: '景观位', seats: 4, area: '二楼', status: 4, amount: 420.00 }
-])
+const tableList = ref([])
+const tableLoading = ref(false)
+const tableError = ref('')
+const tableAreas = ref([])
+
+function formatTable(raw) {
+  return {
+    id: raw.id,
+    number: raw.number,
+    name: (raw.personNumber || 2) + '人桌',
+    seats: raw.personNumber || 2,
+    area: raw.area || '大厅',
+    status: raw.status || 0,
+    amount: raw.amount || 0,
+    minSpend: raw.minSpend || 0,
+  }
+}
+
+async function fetchTables() {
+  tableLoading.value = true
+  tableError.value = ''
+  try {
+    const res = await merchantApi.getTables()
+    const rawList = res.data?.data || res.data || []
+    const formatted = rawList.map(formatTable)
+    tableList.value = formatted
+    const areas = [...new Set(formatted.map(t => t.area))]
+    tableAreas.value = areas
+  } catch (err) {
+    console.error(err)
+    tableError.value = '桌台数据加载失败，请检查后端是否启动'
+    tableList.value = []
+  } finally {
+    tableLoading.value = false
+  }
+}
 
 const filteredTables = computed(() => {
   if (selectedArea.value === '全部') return tableList.value
@@ -40,9 +84,136 @@ const filteredTables = computed(() => {
 
 // --- 菜品弹窗逻辑 ---
 const showDishModal = ref(false)
+const editingId = ref(null)
+const dishList = ref([])
+const dishLoading = ref(false)
 const dishForm = reactive({
-  name: '', type_id: '', price: 0, memberPrice: 0, stock: 99, status: 1, cover_url: '', specs: [], tastes: []
+  name: '', type_id: null, price: 0, memberPrice: 0, stock: 99, status: 1, cover_url: '', specs: [], tastes: []
 })
+
+function resetDishForm() {
+  Object.assign(dishForm, { name: '', type_id: null, price: 0, memberPrice: 0, stock: 99, status: 1, cover_url: '', specs: [], tastes: [] })
+}
+
+function openAddModal() {
+  editingId.value = null
+  resetDishForm()
+  showDishModal.value = true
+}
+
+function openEditModal(dish) {
+  editingId.value = dish.id
+  dishForm.name = dish.name || ''
+  dishForm.type_id = dish.typeId || null
+  dishForm.price = dish.price || 0
+  dishForm.memberPrice = dish.memberPrice || 0
+  dishForm.stock = dish.stock || 99
+  dishForm.status = dish.status ?? 1
+  dishForm.cover_url = dish.coverUrl || ''
+  dishForm.specs = []
+  dishForm.tastes = []
+  showDishModal.value = true
+}
+
+// --- 分类管理 ---
+const categoryList = ref([])
+const categoryForm = reactive({ name: '', iconUri: '' })
+const editingCategoryId = ref(null)
+const catKeyword = ref('')
+
+async function fetchCategories() {
+  try {
+    const res = await merchantApi.getCategories(catKeyword.value || null)
+    categoryList.value = res.data?.data || res.data || []
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+function onCatKeywordChange() {
+  fetchCategories()
+}
+
+function openAddCategory() {
+  editingCategoryId.value = null
+  categoryForm.name = ''
+  categoryForm.iconUri = ''
+}
+
+async function saveCategory() {
+  try {
+    if (editingCategoryId.value) {
+      await merchantApi.updateCategory(editingCategoryId.value, categoryForm)
+    } else {
+      await merchantApi.addCategory(categoryForm)
+    }
+    showToast(editingCategoryId.value ? '更新成功' : '新增成功')
+    editingCategoryId.value = null
+    categoryForm.name = ''
+    categoryForm.iconUri = ''
+    await fetchCategories()
+    app.loadPortalData(true)
+  } catch (err) {
+    console.error(err)
+    showToast('保存失败')
+  }
+}
+
+function editCategory(cat) {
+  editingCategoryId.value = cat.id
+  categoryForm.name = cat.name || ''
+  categoryForm.iconUri = cat.iconUri || ''
+}
+
+async function removeCategory(cat) {
+  try {
+    await merchantApi.deleteCategory(cat.id)
+    showToast('删除成功')
+    await fetchCategories()
+    app.loadPortalData(true)
+  } catch (err) {
+    console.error(err)
+    showToast('删除失败')
+  }
+}
+
+async function fetchDishes() {
+  dishLoading.value = true
+  try {
+    const res = await merchantApi.getDishes()
+    dishList.value = res.data?.data || res.data || []
+  } catch (err) {
+    console.error(err)
+    dishList.value = []
+  } finally {
+    dishLoading.value = false
+  }
+}
+
+async function toggleDishStatus(dish) {
+  const next = dish.status === 1 ? 0 : 1
+  try {
+    await merchantApi.updateDishStatus(dish.id, next)
+    showToast(next === 1 ? '已上架' : '已下架')
+    await fetchDishes()
+    app.loadPortalData()
+  } catch (err) {
+    console.error(err)
+    showToast('操作失败')
+  }
+}
+
+async function removeDish(dish) {
+  try {
+    await merchantApi.deleteDish(dish.id)
+    showToast('删除成功')
+    await fetchDishes()
+    app.loadPortalData()
+  } catch (err) {
+    console.error(err)
+    showToast('删除失败')
+  }
+}
 
 // --- 真实接口逻辑 ---
 const handleImageUpload = async (event) => {
@@ -55,22 +226,29 @@ const handleImageUpload = async (event) => {
   try {
     const res = await merchantApi.uploadFile(formData);
     dishForm.cover_url = res.data.data || res.data;
-    alert('图片上传成功！');
+    showToast('图片上传成功！');
   } catch (err) {
     console.error(err);
-    alert('图片上传失败，请确保后端启动并正确配置了接口');
+    showToast('图片上传失败，请检查后端');
   }
 };
 
 const saveDish = async () => {
   try {
-    await merchantApi.addDish(dishForm);
+    if (editingId.value) {
+      await merchantApi.updateDish(editingId.value, dishForm);
+      showToast('更新成功！');
+    } else {
+      await merchantApi.addDish(dishForm);
+      showToast('新增成功！');
+    }
     showDishModal.value = false;
-    alert('菜品保存成功！');
-    app.loadPortalData();
+    resetDishForm()
+    await fetchDishes()
+    app.loadPortalData(true);
   } catch (err) {
     console.error(err);
-    alert('保存失败，请检查后端接口');
+    showToast('保存失败，请检查后端');
   }
 };
 
@@ -78,26 +256,79 @@ const handleTableClick = async (table) => {
   let nextStatus = table.status === 0 ? 1 : 0;
   if (table.status === 4) nextStatus = 0;
 
-  const actionName = nextStatus === 0 ? '清台并设为空闲' : '开台并设为入座';
-
-  if (confirm(`确认要对 ${table.number} 号桌进行【${actionName}】操作吗？`)) {
-    try {
-      await merchantApi.updateTableStatus(table.id, nextStatus);
-      table.status = nextStatus;
-      if (nextStatus === 0) table.amount = 0;
-      alert('桌台状态已更新！');
-    } catch (err) {
-      console.error(err);
-      alert('状态更新失败，请检查后端');
-    }
+  try {
+    await merchantApi.updateTableStatus(table.id, nextStatus);
+    await fetchTables();
+  } catch (err) {
+    console.error(err);
+    showToast('状态更新失败');
   }
 };
+
+// --- 订单管理 ---
+const orderList = ref([])
+const orderStatusFilter = ref(null)
+const ORDER_STATUS = { 1:'待支付', 2:'已支付', 3:'出餐中', 4:'已完成' }
+
+async function fetchOrders() {
+  try {
+    const res = await merchantApi.getOrders(orderStatusFilter.value)
+    orderList.value = res.data?.data || res.data || []
+  } catch (err) { console.error(err) }
+}
+
+async function changeOrderStatus(order, nextStatus) {
+  try {
+    await merchantApi.updateOrderStatus(order.id, nextStatus)
+    showToast('状态已更新')
+    await fetchOrders()
+  } catch (err) { console.error(err); showToast('更新失败') }
+}
+
+// --- 桌台增删改 ---
+const tableForm = reactive({ number: '', personNumber: 2, area: '大厅', minSpend: 0 })
+const showTableForm = ref(false)
+const editingTableId = ref(null)
+
+function openAddTable() {
+  editingTableId.value = null
+  tableForm.number = ''; tableForm.personNumber = 2; tableForm.area = '大厅'; tableForm.minSpend = 0
+  showTableForm.value = true
+}
+
+function openEditTable(table) {
+  editingTableId.value = table.id
+  tableForm.number = table.number; tableForm.personNumber = table.seats
+  tableForm.area = table.area; tableForm.minSpend = table.minSpend || 0
+  showTableForm.value = true
+}
+
+async function saveTable() {
+  try {
+    if (editingTableId.value) {
+      await merchantApi.updateTable(editingTableId.value, tableForm)
+    } else {
+      await merchantApi.addTable(tableForm)
+    }
+    showToast(editingTableId.value ? '更新成功' : '新增成功')
+    showTableForm.value = false
+    await fetchTables()
+  } catch (err) { console.error(err); showToast('保存失败') }
+}
+
+async function removeTable(table) {
+  try {
+    await merchantApi.deleteTable(table.id)
+    showToast('删除成功')
+    await fetchTables()
+  } catch (err) { console.error(err); showToast('删除失败') }
+}
 
 async function exitPortal() {
   app.logout(); await router.push('/login')
 }
 
-onMounted(() => { app.loadPortalData() })
+onMounted(() => { app.loadPortalData(); fetchTables(); fetchDishes(); fetchCategories() })
 </script>
 
 <template>
@@ -112,13 +343,13 @@ onMounted(() => { app.loadPortalData() })
       </div>
 
       <nav class="nav-links">
-        <div class="nav-item" :class="{ active: currentMenu === 'B01' }" @click="currentMenu = 'B01'">
+        <div class="nav-item" :class="{ active: currentMenu === 'B01' }" @click="switchTab('B01')">
           <i class="icon">🍱</i> 菜品管理 (B01)
         </div>
-        <div class="nav-item" :class="{ active: currentMenu === 'B02' }" @click="currentMenu = 'B02'">
+        <div class="nav-item" :class="{ active: currentMenu === 'B02' }" @click="switchTab('B02')">
           <i class="icon">🪑</i> 桌台管理 (B02)
         </div>
-        <div class="nav-item" @click="currentMenu = 'B03'">
+        <div class="nav-item" @click="switchTab('B03')">
           <i class="icon">📊</i> 营业数据
         </div>
       </nav>
@@ -132,6 +363,7 @@ onMounted(() => { app.loadPortalData() })
           @logout="exitPortal"
       />
 
+      <div v-if="toast" class="toast-bar">{{ toast }}</div>
       <div class="page-container">
 
         <div v-if="currentMenu === 'B01'" class="module-box">
@@ -140,7 +372,7 @@ onMounted(() => { app.loadPortalData() })
               <span :class="{ active: subTab === 'list' }" @click="subTab = 'list'">菜品库管理</span>
               <span :class="{ active: subTab === 'category' }" @click="subTab = 'category'">分类配置</span>
             </div>
-            <button v-if="subTab === 'list'" class="btn-primary" @click="showDishModal = true">+ 新增菜品</button>
+            <button v-if="subTab === 'list'" class="btn-primary" @click="openAddModal">+ 新增菜品</button>
           </div>
 
           <table class="biz-table">
@@ -156,33 +388,63 @@ onMounted(() => { app.loadPortalData() })
             </tr>
             </thead>
             <tbody>
-            <tr v-for="item in app.menuItems.value" :key="item.id">
+            <tr v-for="item in dishList" :key="item.id">
               <td><input type="checkbox" /></td>
               <td>
                 <div class="dish-info">
-                  <img :src="item.cover_url || '/placeholder.png'" class="dish-img" />
+                  <img :src="item.coverUrl || '/placeholder.png'" class="dish-img" />
                   <div>
                     <p class="dish-name">{{ item.name }}</p>
                   </div>
                 </div>
               </td>
-              <td>{{ item.categoryLabel }}</td>
+              <td>{{ item.typeName || '-' }}</td>
               <td>
-                <p class="sell-price">￥{{ Number(item.price).toFixed(2) }}</p>
-                <p class="member-price">会员: ￥{{ (item.price * 0.9).toFixed(2) }}</p>
+                <p class="sell-price">￥{{ Number(item.price || 0).toFixed(2) }}</p>
+                <p class="member-price">会员: ￥{{ Number(item.memberPrice || 0).toFixed(2) }}</p>
               </td>
-              <td>{{ item.stock || 99 }}</td>
+              <td>{{ item.stock || 0 }}</td>
               <td>
-                  <span :class="['chip', item.status === 'AVAILABLE' ? 'chip-green' : 'chip-gray']">
-                    {{ item.status === 'AVAILABLE' ? '在售' : '下架' }}
+                  <span :class="['chip', item.status === 1 ? 'chip-green' : 'chip-gray']">
+                    {{ item.status === 1 ? '在售' : '下架' }}
                   </span>
               </td>
               <td>
-                <button class="btn-link danger">下架</button>
+                <button class="btn-link" @click="openEditModal(item)">编辑</button>
+                <button class="btn-link" @click="toggleDishStatus(item)">
+                  {{ item.status === 1 ? '下架' : '上架' }}
+                </button>
+                <button class="btn-link danger" @click="removeDish(item)">删除</button>
               </td>
             </tr>
             </tbody>
           </table>
+
+          <div v-if="subTab === 'category'" style="margin-top:24px">
+            <div style="display:flex;gap:12px;margin-bottom:8px">
+              <input v-model="catKeyword" @input="onCatKeywordChange" placeholder="搜索分类名称..." style="padding:6px 12px;border:1px solid #e0d4c3;border-radius:6px;width:200px" />
+            </div>
+            <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center">
+              <input v-model="categoryForm.name" placeholder="分类名称" style="padding:6px 12px;border:1px solid #e0d4c3;border-radius:6px;width:160px" />
+              <input v-model="categoryForm.iconUri" placeholder="图标URL(可选)" style="padding:6px 12px;border:1px solid #e0d4c3;border-radius:6px;width:200px" />
+              <button class="btn-primary" @click="saveCategory" style="padding:6px 16px">{{ editingCategoryId ? '更新' : '新增' }}</button>
+              <button v-if="editingCategoryId" class="btn-cancel" @click="openAddCategory" style="padding:6px 16px">取消</button>
+            </div>
+            <table class="biz-table">
+              <thead><tr><th>ID</th><th>名称</th><th>图标</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr v-for="cat in categoryList" :key="cat.id">
+                  <td>{{ cat.id }}</td>
+                  <td>{{ cat.name }}</td>
+                  <td>{{ cat.iconUri || '-' }}</td>
+                  <td>
+                    <button class="btn-link" @click="editCategory(cat)">编辑</button>
+                    <button class="btn-link danger" @click="removeCategory(cat)">删除</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div v-if="currentMenu === 'B02'" class="module-box">
@@ -190,6 +452,7 @@ onMounted(() => { app.loadPortalData() })
             <div class="tab-triggers">
               <span :class="{ active: subTab === 'layout' }" @click="subTab = 'layout'">实时桌态布局</span>
             </div>
+            <button class="btn-primary" @click="openAddTable" style="padding:6px 16px">+ 新增桌台</button>
           </div>
 
           <div class="table-tool-bar">
@@ -208,7 +471,9 @@ onMounted(() => { app.loadPortalData() })
             </div>
           </div>
 
-          <div class="visual-grid">
+          <p v-if="tableError" class="form-message" style="color:#d32f2f">{{ tableError }}</p>
+          <p v-if="tableLoading" class="empty-hint">桌台数据加载中...</p>
+          <div v-if="!tableLoading" class="visual-grid">
             <div
                 v-for="table in filteredTables"
                 :key="table.id"
@@ -225,8 +490,36 @@ onMounted(() => { app.loadPortalData() })
                 <p v-if="table.amount > 0" class="t-amount">￥{{ table.amount.toFixed(2) }}</p>
                 <p v-else class="t-status-text">{{ TABLE_STATUS[table.status].label }}</p>
               </div>
+              <div style="display:flex;gap:4px;margin-top:8px;justify-content:center">
+                <button class="btn-link" @click.stop="openEditTable(table)" style="font-size:12px">编辑</button>
+                <button class="btn-link danger" @click.stop="removeTable(table)" style="font-size:12px">删除</button>
+              </div>
             </div>
           </div>
+        </div>
+
+        <div v-if="currentMenu === 'B03'" class="module-box">
+          <div class="tab-header"><h3>全店订单</h3></div>
+          <div style="display:flex;gap:8px;margin-bottom:12px">
+            <button v-for="(label,val) in ORDER_STATUS" :key="val" class="ghost-button" :class="{active:orderStatusFilter===Number(val)}" @click="orderStatusFilter=orderStatusFilter===Number(val)?null:Number(val);fetchOrders()">{{ label }}</button>
+          </div>
+          <table class="biz-table">
+            <thead><tr><th>订单号</th><th>金额</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr v-for="o in orderList" :key="o.id">
+                <td>{{ o.code }}</td>
+                <td>￥{{ Number(o.totalPrice||0).toFixed(2) }}</td>
+                <td><span :class="['chip', o.status===4?'chip-green':o.status===1?'chip-gray':'']">{{ ORDER_STATUS[o.status]||o.status }}</span></td>
+                <td>{{ o.createTime }}</td>
+                <td>
+                  <select @change="changeOrderStatus(o,Number($event.target.value))" style="padding:4px 8px;border-radius:4px">
+                    <option value="">变更状态</option>
+                    <option v-for="(label,val) in ORDER_STATUS" :key="val" :value="val" :disabled="val===o.status">{{ label }}</option>
+                  </select>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
       </div>
@@ -235,7 +528,7 @@ onMounted(() => { app.loadPortalData() })
     <div v-if="showDishModal" class="biz-modal">
       <div class="modal-content">
         <div class="modal-header">
-          <h3>新增菜品信息</h3>
+          <h3>{{ editingId ? '编辑菜品' : '新增菜品信息' }}</h3>
           <button @click="showDishModal = false">×</button>
         </div>
         <div class="modal-body">
@@ -243,6 +536,14 @@ onMounted(() => { app.loadPortalData() })
             <div class="form-group span-2">
               <label>菜品名称</label>
               <input type="text" v-model="dishForm.name" placeholder="输入菜品名称" />
+            </div>
+
+            <div class="form-group">
+              <label>菜品分类</label>
+              <select v-model.number="dishForm.type_id" style="padding:8px 12px;border:1px solid #e0d4c3;border-radius:6px">
+                <option :value="null">未分类</option>
+                <option v-for="cat in categoryList" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
+              </select>
             </div>
 
             <div class="form-group">
@@ -270,6 +571,40 @@ onMounted(() => { app.loadPortalData() })
       </div>
     </div>
   </div>
+
+    <div v-if="showTableForm" class="biz-modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>{{ editingTableId ? '编辑桌台' : '新增桌台' }}</h3>
+          <button @click="showTableForm = false">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="form-group">
+              <label>桌号</label>
+              <input v-model="tableForm.number" placeholder="如 A01" />
+            </div>
+            <div class="form-group">
+              <label>人数</label>
+              <input type="number" v-model.number="tableForm.personNumber" />
+            </div>
+            <div class="form-group">
+              <label>区域</label>
+              <input v-model="tableForm.area" placeholder="大厅/包间/二楼" />
+            </div>
+            <div class="form-group">
+              <label>最低消费</label>
+              <input type="number" v-model.number="tableForm.minSpend" />
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancel" @click="showTableForm = false">取消</button>
+          <button class="btn-primary" @click="saveTable">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -286,6 +621,10 @@ onMounted(() => { app.loadPortalData() })
 .nav-item { padding: 14px 24px; cursor: pointer; transition: 0.3s; display: flex; align-items: center; gap: 12px; font-weight: 500;}
 .nav-item:hover { color: #f57c00; background: rgba(245, 124, 0, 0.08); }
 .nav-item.active { background: #f57c00; color: white; box-shadow: 0 4px 10px rgba(245, 124, 0, 0.2);}
+
+/* Toast 提示条 */
+.toast-bar { background: #323232; color: #fff; padding: 10px 24px; text-align: center; font-size: 14px; animation: fadeInOut 2s ease; }
+@keyframes fadeInOut { 0% { opacity: 0; transform: translateY(-8px); } 10% { opacity: 1; transform: translateY(0); } 80% { opacity: 1; } 100% { opacity: 0; } }
 
 /* 主体内容区 */
 .content-wrapper { flex: 1; display: flex; flex-direction: column; overflow: hidden; }

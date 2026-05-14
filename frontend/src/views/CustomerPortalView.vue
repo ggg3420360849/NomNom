@@ -74,11 +74,10 @@ onMounted(() => {
             </button>
           </div>
           <input
-            :value="app.keyword.value"
+            v-model.lazy="app.keyword.value"
             class="search-input"
             type="text"
             placeholder="搜索菜品或套餐"
-            @input="app.keyword.value = $event.target.value"
           />
         </div>
 
@@ -144,6 +143,7 @@ onMounted(() => {
           <!-- Preview and submit are separate so teammates can extend them independently. -->
           <div>
             <p class="section-tag">订单预览</p>
+            <p v-if="app.preview.value.remark">备注：{{ app.preview.value.remark }}</p>
             <h3>合计 {{ app.preview.value.itemCount }} 件，￥ {{ Number(app.preview.value.totalAmount || 0).toFixed(2) }}</h3>
             <p>{{ app.preview.value.suggestion }}</p>
             <p class="preview-total">购物车当前金额：￥ {{ app.cartTotal.value.toFixed(2) }}</p>
