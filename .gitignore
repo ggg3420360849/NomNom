@@ -49,3 +49,9 @@ yarn-error.log*
 
 # backup sql only
 /backup/*.sql
+
+# local uploads
+backend/uploads/
+
+# local claude config
+.claude/settings.local.json
