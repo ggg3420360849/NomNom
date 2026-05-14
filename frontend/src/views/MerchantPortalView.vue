@@ -570,7 +570,6 @@ onMounted(() => { app.loadPortalData(); fetchTables(); fetchDishes(); fetchCateg
         </div>
       </div>
     </div>
-  </div>
 
     <div v-if="showTableForm" class="biz-modal">
       <div class="modal-content">
