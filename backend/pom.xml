@@ -73,6 +73,11 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <jvmArguments>
+                        --add-opens java.base/java.lang.invoke=ALL-UNNAMED
+                    </jvmArguments>
+                </configuration>
             </plugin>
         </plugins>
     </build>

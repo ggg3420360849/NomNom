@@ -24,3 +24,6 @@ mybatis-plus:
 jwt:
   secret: ${NOMNOM_JWT_SECRET:nomnom-jwt-secret-key-2026-must-be-at-least-256-bits-long!!}
   expiration: 86400
+
+nomnom:
+  upload-path: ${NOMNOM_UPLOAD_PATH:backend/uploads}
