@@ -247,6 +247,10 @@ create index idex_wallet_id
 insert into user (id, account, username, password, avatar, email, role, gender, birthday, phone, create_time)
 values (1, '123456', 'aaa', '$2b$10$9FOQgf7wwoVm7tRWNdtoyOA/YsHUk9bcKS/fxAvsLAk5D9ZoQZdRS', null, null, 1, null, null, null, '2026-05-08 21:00:11');
 
+-- 账号 merchant1 / 密码 123456 (商家)
+insert into user (id, account, username, password, avatar, email, role, gender, birthday, phone, create_time)
+values (3, 'merchant1', '商家甲', '$2b$10$9FOQgf7wwoVm7tRWNdtoyOA/YsHUk9bcKS/fxAvsLAk5D9ZoQZdRS', null, null, 2, null, null, null, '2026-05-08 21:00:30');
+
 -- 账号 1234567 / 密码 1234567 (顾客)
 insert into user (id, account, username, password, avatar, email, role, gender, birthday, phone, create_time)
 values (2, '1234567', 'bbb', '$2b$10$wxW1d5pgB.QmGpuA6N4RH.o7rZLmYHmTzMCzO5UB0qOPNAHX4bLcG', null, null, 1, null, null, null, '2026-05-08 21:00:24');
