@@ -1,21 +1,130 @@
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import MetricStrip from '../components/MetricStrip.vue'
 import PortalHeader from '../components/PortalHeader.vue'
 import { useNomNomApp } from '../utils/useNomNomApp'
+import axios from 'axios'
 
-// This page focuses on rendering and user interaction. Shared state lives in useNomNomApp.
 const router = useRouter()
 const app = useNomNomApp()
+
+// ==========================
+// axios 配置（连接后端）
+// ==========================
+const http = axios.create({
+  baseURL: 'http://localhost:8080/api',
+  timeout: 10000
+})
+
+// 充值功能
+const wallet = ref(0)
+const rechargeVisible = ref(false)
+const rechargeAmount = ref('')
+
+function openRechargeDialog() {
+  rechargeAmount.value = ''
+  rechargeVisible.value = true
+}
+function doRecharge() {
+  const num = Number(rechargeAmount.value)
+  if (!num || num <= 0) return alert('请输入正确金额')
+  wallet.value = Number((wallet.value + num).toFixed(2))
+  alert('充值成功！余额：¥' + wallet.value.toFixed(2))
+  rechargeVisible.value = false
+}
+
+// 菜品详情弹窗
+const detailVisible = ref(false)
+const currentDish = ref({})
+
+function openDetail(item) {
+  currentDish.value = item
+  detailVisible.value = true
+}
+
+// 订单小票弹窗
+const orderReceiptVisible = ref(false)
+const orderInfo = ref({})
+
+// ==========================
+// 从后端加载真实菜品 
+// ==========================
+const localMenuItems = ref([])
+
+async function loadMenu() {
+  try {
+    const res = await http.get('/dish/list')
+    localMenuItems.value = res.data.data || []
+  } catch (err) {
+    console.error('加载菜单失败', err)
+    alert('菜单加载失败')
+  }
+}
+
+// 分类 + 搜索
+const activeCategory = ref('')
+const keyword = ref('')
+const filteredMenuItems = computed(() => {
+  return localMenuItems.value.filter(item => {
+    // 状态必须是可售卖
+    if (item.status !== 'AVAILABLE') return false
+
+    const c = activeCategory.value ? item.category === activeCategory.value : true
+    const k = keyword.value
+      ? item.name.includes(keyword.value) || (item.description || '').includes(keyword.value)
+      : true
+    return c && k
+  })
+})
+
+// 购物车
+const cart = ref([])
+const cartCount = computed(() => cart.value.reduce((s, i) => s + i.quantity, 0))
+const cartTotal = computed(() => {
+  const total = cart.value.reduce((s, i) => s + i.price * i.quantity, 0)
+  return Number(total.toFixed(2))
+})
+
+function addToCart(item) {
+  const found = cart.value.find(i => i.id === item.id)
+  if (found) found.quantity++
+  else cart.value.push({ ...item, quantity: 1 })
+}
+function updateQuantity(id, num) {
+  const it = cart.value.find(i => i.id === id)
+  if (!it) return
+  it.quantity += num
+  if (it.quantity <= 0) cart.value = cart.value.filter(i => i.id !== id)
+}
+
+// 提交订单
+function handleSubmit() {
+  if (cartCount.value === 0) return alert('购物车是空的！')
+  if (wallet.value < cartTotal.value) return alert('余额不足，请先充值')
+
+  orderInfo.value = {
+    time: new Date().toLocaleString(),
+    items: [...cart.value],
+    total: cartTotal.value,
+    balance: Number((wallet.value - cartTotal.value).toFixed(2))
+  }
+
+  wallet.value = orderInfo.value.balance
+  orderReceiptVisible.value = true
+  cart.value = []
+}
 
 async function exitPortal() {
   app.logout()
   await router.push('/login')
 }
 
+// ==========================
+// 页面打开加载菜单 
+// ==========================
 onMounted(() => {
   app.loadPortalData()
+  loadMenu()
 })
 </script>
 
@@ -29,156 +138,477 @@ onMounted(() => {
       @logout="exitPortal"
     />
 
-    <p v-if="app.portalMessage.value" class="form-message">{{ app.portalMessage.value }}</p>
+    <!-- 余额 + 充值 -->
+    <div class="wallet-bar">
+      <span>余额：¥{{ wallet.toFixed(2) }}</span>
+      <button class="recharge-btn" @click="openRechargeDialog">充值</button>
+    </div>
 
-    <MetricStrip :metrics="app.customerStats.value" />
+    <!-- 主体布局：左侧分类 + 中间菜单 + 底部购物车 -->
+    <div class="main-layout">
+      <!-- 左侧垂直分类栏 -->
+      <aside class="category-sidebar">
+        <button 
+          class="category-btn" 
+          :class="{ active: activeCategory === '' }" 
+          @click="activeCategory = ''"
+        >
+          全部
+        </button>
+        <button 
+          class="category-btn" 
+          :class="{ active: activeCategory === 'rice' }" 
+          @click="activeCategory = 'rice'"
+        >
+          主食
+        </button>
+        <button 
+          class="category-btn" 
+          :class="{ active: activeCategory === 'snack' }" 
+          @click="activeCategory = 'snack'"
+        >
+          小吃
+        </button>
+        <button 
+          class="category-btn" 
+          :class="{ active: activeCategory === 'drink' }" 
+          @click="activeCategory = 'drink'"
+        >
+          饮品
+        </button>
+      </aside>
 
-    <main class="portal-grid customer-grid">
-      <section class="panel module-panel">
-        <div class="panel-head">
-          <div>
-            <p class="section-tag">顾客模块</p>
-            <h2>只保留顾客功能</h2>
-          </div>
-        </div>
-        <div class="module-grid">
-          <article v-for="module in app.customerModules" :key="module.title" class="module-card">
-            <h3>{{ module.title }}</h3>
-            <p>{{ module.detail }}</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="panel menu-panel">
-        <div class="panel-head">
-          <div>
-            <p class="section-tag">顾客点餐</p>
-            <h2>菜单与套餐</h2>
-          </div>
-        </div>
-
-        <div class="toolbar">
-          <!-- Category and keyword changes are written back to the shared store. -->
-          <div class="category-list">
-            <button class="ghost-button" :class="{ active: app.activeCategory.value === '' }" @click="app.activeCategory.value = ''">
-              全部
-            </button>
-            <button
-              v-for="category in app.categories.value"
-              :key="category.code"
-              class="ghost-button"
-              :class="{ active: app.activeCategory.value === category.code }"
-              @click="app.activeCategory.value = category.code"
-            >
-              {{ category.name }}
-            </button>
-          </div>
-          <input
-            v-model.lazy="app.keyword.value"
-            class="search-input"
-            type="text"
-            placeholder="搜索菜品或套餐"
+      <!-- 中间菜单区域 -->
+      <section class="menu-area">
+        <div class="search-box">
+          <input 
+            v-model.lazy="keyword" 
+            class="search-input" 
+            type="text" 
+            placeholder="搜索菜品或套餐" 
           />
         </div>
 
         <div class="menu-list">
-          <article v-for="item in app.filteredMenuItems.value" :key="item.id" class="menu-card">
-            <div class="menu-card__meta">
-              <span class="menu-card__badge">{{ item.categoryLabel || item.category }}</span>
-              <span class="menu-card__sales">{{ item.status === 'AVAILABLE' ? '可下单' : '已下架' }}</span>
-            </div>
-            <div>
-              <h3>{{ item.name }}</h3>
-              <p>{{ item.description || '暂无菜品描述。' }}</p>
-            </div>
-            <div class="menu-card__footer">
-              <strong>￥ {{ Number(item.price).toFixed(2) }}</strong>
-              <button class="primary-button" :disabled="item.status !== 'AVAILABLE'" @click="app.addToCart(item)">
-                {{ item.status === 'AVAILABLE' ? '加入购物车' : '不可下单' }}
-              </button>
-            </div>
+          <article 
+            v-for="item in filteredMenuItems" 
+            :key="item.id" 
+            class="menu-card"
+            @click="openDetail(item)"
+          >
+            <img :src="item.coverUrl" class="menu-image" />
+            <h3 class="menu-title">{{ item.name }}</h3>
+            <p class="menu-price">¥{{ item.price.toFixed(2) }}</p>
+            <button class="add-btn" @click.stop="addToCart(item)">+</button>
           </article>
-          <p v-if="app.menuItems.value.length > 0 && app.filteredMenuItems.value.length === 0" class="empty-hint">
-            当前筛选条件下没有可显示的菜品。
-          </p>
         </div>
       </section>
+    </div>
 
-      <section class="panel order-panel">
-        <div class="panel-head">
-          <div>
-            <p class="section-tag">顾客订单</p>
-            <h2>购物车与下单</h2>
+    <!-- 底部固定购物车结算栏 -->
+    <footer class="cart-footer">
+      <div class="cart-summary">
+        <div class="cart-info">
+          <span class="cart-count">共 {{ cartCount }} 件</span>
+          <span class="cart-total">合计：¥{{ cartTotal.toFixed(2) }}</span>
+        </div>
+        <button 
+          class="submit-btn" 
+          :disabled="cartCount === 0 || wallet < cartTotal"
+          @click="handleSubmit"
+        >
+          提交订单
+        </button>
+      </div>
+
+      <div class="cart-items">
+        <article v-for="item in cart" :key="item.id" class="cart-item">
+          <div class="item-info">
+            <h3>{{ item.name }}</h3>
+            <p>单价 ￥{{ item.price.toFixed(2) }}</p>
           </div>
-          <span class="status-chip">共 {{ app.cartCount.value }} 件</span>
-        </div>
-
-        <div class="form-grid">
-          <label>
-            <span>顾客名称</span>
-            <input :value="app.displayName.value" type="text" disabled />
-          </label>
-          <label class="full-width">
-            <span>备注</span>
-            <textarea v-model="app.customerDraft.remark" rows="3" placeholder="口味、忌口、加急说明"></textarea>
-          </label>
-        </div>
-
-        <div class="cart-list">
-          <article v-for="item in app.cart.value" :key="item.id" class="cart-item">
-            <div>
-              <h3>{{ item.name }}</h3>
-              <p>单价 ￥ {{ item.price.toFixed(2) }}</p>
-            </div>
-            <div class="stepper">
-              <button @click="app.updateQuantity(item.id, -1)">-</button>
-              <span>{{ item.quantity }}</span>
-              <button @click="app.updateQuantity(item.id, 1)">+</button>
-            </div>
-          </article>
-          <p v-if="app.cart.value.length === 0" class="empty-hint">购物车还是空的，可以先从左侧菜单中选择菜品。</p>
-        </div>
-
-        <div class="preview-box">
-          <!-- Preview and submit are separate so teammates can extend them independently. -->
-          <div>
-            <p class="section-tag">订单预览</p>
-            <p v-if="app.preview.value.remark">备注：{{ app.preview.value.remark }}</p>
-            <h3>合计 {{ app.preview.value.itemCount }} 件，￥ {{ Number(app.preview.value.totalAmount || 0).toFixed(2) }}</h3>
-            <p>{{ app.preview.value.suggestion }}</p>
-            <p class="preview-total">购物车当前金额：￥ {{ app.cartTotal.value.toFixed(2) }}</p>
+          <div class="quantity-control">
+            <button class="qty-btn" @click="updateQuantity(item.id, -1)">-</button>
+            <span class="qty-text">{{ item.quantity }}</span>
+            <button class="qty-btn" @click="updateQuantity(item.id, 1)">+</button>
           </div>
-          <div class="action-row">
-            <button class="ghost-cta" @click="app.handlePreview">生成预览</button>
-            <button class="primary-button" @click="app.handleSubmit">提交订单</button>
-          </div>
-          <p v-if="app.submitMessage.value" class="submit-message">{{ app.submitMessage.value }}</p>
-        </div>
-      </section>
+        </article>
+        <p v-if="cart.length === 0" class="empty-hint">购物车还是空的~</p>
+      </div>
+    </footer>
 
-      <section class="panel queue-panel">
-        <div class="panel-head">
-          <div>
-            <p class="section-tag">顾客订单中心</p>
-            <h2>我的订单</h2>
+    <!-- 充值弹窗 -->
+    <div v-if="rechargeVisible" class="modal-overlay" @click.self="rechargeVisible = false">
+      <div class="modal">
+        <h3>模拟充值</h3>
+        <input v-model.number="rechargeAmount" type="number" placeholder="输入金额" />
+        <div class="modal-buttons">
+          <button @click="rechargeVisible = false">取消</button>
+          <button class="primary-button" @click="doRecharge">确认</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 菜品详情弹窗 -->
+    <div v-if="detailVisible" class="modal-overlay" @click.self="detailVisible = false">
+      <div class="modal modal-lg">
+        <img :src="currentDish.coverUrl" class="detail-img" />
+        <h3>{{ currentDish.name }}</h3>
+        <p>{{ currentDish.description }}</p>
+        <p class="detail-price">¥{{ currentDish.price.toFixed(2) }}</p>
+        <button class="primary-button" @click="addToCart(currentDish)">加入购物车</button>
+      </div>
+    </div>
+
+    <!-- 订单小票弹窗 -->
+    <div v-if="orderReceiptVisible" class="modal-overlay" @click.self="orderReceiptVisible = false">
+      <div class="modal receipt-modal">
+        <div class="receipt-header">
+          <h3>订单支付成功</h3>
+          <p>{{ orderInfo.time }}</p>
+        </div>
+
+        <div class="receipt-body">
+          <div class="receipt-item" v-for="(item, idx) in orderInfo.items" :key="idx">
+            <div class="name">{{ item.name }}</div>
+            <div class="count">x{{ item.quantity }}</div>
+            <div class="sub">¥{{ (item.price * item.quantity).toFixed(2) }}</div>
           </div>
         </div>
 
-        <div class="queue-list">
-          <article v-for="order in app.orderQueue.value" :key="order.orderNo" class="queue-card">
-            <div>
-              <p class="queue-label">{{ order.orderNo }}</p>
-              <h3>{{ order.customerName }}</h3>
-              <p>{{ order.itemCount }} 份菜品</p>
-            </div>
-            <div class="queue-side">
-              <span class="status-chip">{{ app.formatStatus(order.status) }}</span>
-              <strong>￥ {{ Number(order.totalAmount).toFixed(2) }}</strong>
-            </div>
-          </article>
-          <p v-if="app.orderQueue.value.length === 0" class="empty-hint">当前账号还没有订单记录。</p>
+        <div class="receipt-footer">
+          <div class="line"></div>
+          <div class="total-row">
+            <span>实付金额</span>
+            <span>¥{{ orderInfo.total.toFixed(2) }}</span>
+          </div>
+          <div class="balance-row">
+            <span>剩余余额</span>
+            <span>¥{{ orderInfo.balance.toFixed(2) }}</span>
+          </div>
+          <button class="close-btn" @click="orderReceiptVisible = false">完成</button>
         </div>
-      </section>
-    </main>
+      </div>
+    </div>
   </div>
 </template>
+
+<style scoped>
+/* 全局样式 */
+.portal-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* 余额栏 */
+.wallet-bar {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: #fff;
+  border-bottom: 1px solid #eee;
+  font-weight: bold;
+}
+.recharge-btn {
+  background: #4CAF50;
+  color: white;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* 主体布局：左侧分类 + 中间菜单 */
+.main-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* 左侧垂直分类栏 */
+.category-sidebar {
+  width: 80px;
+  background: #fafafa;
+  border-right: 1px solid #eee;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 0;
+}
+.category-btn {
+  padding: 12px 8px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+.category-btn.active {
+  background: #fff;
+  color: #1890ff;
+  border-left: 3px solid #1890ff;
+}
+
+/* 中间菜单区域 */
+.menu-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 10px;
+}
+.search-box {
+  margin-bottom: 10px;
+}
+.search-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+
+.menu-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+}
+.menu-card {
+  aspect-ratio: 1 / 1;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+}
+.menu-image {
+  width: 100%;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+.menu-title {
+  font-size: 12px;
+  margin: 0 0 4px;
+  text-align: center;
+  line-height: 1.2;
+}
+.menu-price {
+  font-size: 11px;
+  color: #ff4d4f;
+  margin: 0;
+}
+.add-btn {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  background: #1890ff;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+/* 底部固定购物车栏 */
+.cart-footer {
+  background: #fff;
+  border-top: 1px solid #eee;
+  padding: 10px 20px;
+}
+.cart-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.cart-info {
+  display: flex;
+  gap: 20px;
+}
+.cart-count {
+  font-size: 14px;
+}
+.cart-total {
+  font-size: 16px;
+  font-weight: bold;
+  color: #ff4d4f;
+}
+.submit-btn {
+  background: #1890ff;
+  color: white;
+  border: none;
+  padding: 8px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.submit-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.cart-items {
+  max-height: 150px;
+  overflow-y: auto;
+}
+.cart-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #eee;
+}
+.item-info h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+.item-info p {
+  margin: 0;
+  font-size: 11px;
+  color: #666;
+}
+.quantity-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.qty-btn {
+  width: 24px;
+  height: 24px;
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.qty-text {
+  width: 20px;
+  text-align: center;
+  font-size: 13px;
+}
+.empty-hint {
+  text-align: center;
+  color: #999;
+  padding: 10px 0;
+}
+
+/* 弹窗样式 */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+.modal {
+  background: #fff;
+  padding: 16px;
+  border-radius: 8px;
+  width: 320px;
+}
+.modal-lg { 
+  width: 460px; 
+  max-height: 80vh; 
+  overflow-y: auto;
+}
+.detail-img {
+  width: 100%;
+  height: 180px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+.detail-price {
+  color: #ff4d4f;
+  font-size: 16px;
+  font-weight: bold;
+}
+.primary-button {
+  background: #1890ff;
+  color: #fff;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+/* 订单小票样式 */
+.receipt-modal {
+  width: 380px;
+  padding: 24px;
+  border-radius: 12px;
+  text-align: center;
+}
+.receipt-header h3 {
+  margin: 0 0 4px;
+  color: #1890ff;
+}
+.receipt-header p {
+  margin: 0 0 16px;
+  color: #666;
+  font-size: 12px;
+}
+.receipt-body {
+  margin: 16px 0;
+  text-align: left;
+}
+.receipt-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 14px;
+}
+.receipt-item .name {
+  flex: 1;
+}
+.receipt-item .count {
+  width: 40px;
+  text-align: center;
+}
+.receipt-item .sub {
+  width: 60px;
+  text-align: right;
+  font-weight: 500;
+}
+.line {
+  height: 1px;
+  background: #eee;
+  margin: 12px 0;
+}
+.total-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 16px;
+  font-weight: bold;
+  color: #ff4d4f;
+  margin-bottom: 4px;
+}
+.balance-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 16px;
+}
+.close-btn {
+  width: 100%;
+  background: #1890ff;
+  color: white;
+  border: none;
+  padding: 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+</style>
