@@ -141,11 +141,20 @@ function openAddCategory() {
 }
 
 async function saveCategory() {
+  const name = categoryForm.name.trim()
+  const iconUri = categoryForm.iconUri.trim()
+  if (!name) {
+    showToast('请填写分类名称')
+    return
+  }
+
+  const payload = { name, iconUri }
+
   try {
     if (editingCategoryId.value) {
-      await merchantApi.updateCategory(editingCategoryId.value, categoryForm)
+      await merchantApi.updateCategory(editingCategoryId.value, payload)
     } else {
-      await merchantApi.addCategory(categoryForm)
+      await merchantApi.addCategory(payload)
     }
     showToast(editingCategoryId.value ? '更新成功' : '新增成功')
     editingCategoryId.value = null
@@ -155,7 +164,7 @@ async function saveCategory() {
     app.loadPortalData(true)
   } catch (err) {
     console.error(err)
-    showToast('保存失败')
+    showToast(err.message || '保存失败')
   }
 }
 
@@ -431,10 +440,10 @@ onMounted(() => { app.loadPortalData(); fetchTables(); fetchDishes(); fetchCateg
               <button v-if="editingCategoryId" class="btn-cancel" @click="openAddCategory" style="padding:6px 16px">取消</button>
             </div>
             <table class="biz-table">
-              <thead><tr><th>ID</th><th>名称</th><th>图标</th><th>操作</th></tr></thead>
+              <thead><tr><th>序号</th><th>名称</th><th>图标</th><th>操作</th></tr></thead>
               <tbody>
-                <tr v-for="cat in categoryList" :key="cat.id">
-                  <td>{{ cat.id }}</td>
+                <tr v-for="(cat, index) in categoryList" :key="cat.id">
+                  <td>{{ index + 1 }}</td>
                   <td>{{ cat.name }}</td>
                   <td>{{ cat.iconUri || '-' }}</td>
                   <td>
