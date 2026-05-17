@@ -12,7 +12,7 @@ const app = useNomNomApp()
 // axios 配置（连接后端）
 // ==========================
 const http = axios.create({
-  baseURL: 'http://localhost:8080/api',
+  baseURL: '/api',
   timeout: 10000
 })
 
@@ -53,7 +53,7 @@ const localMenuItems = ref([])
 
 async function loadMenu() {
   try {
-    const res = await http.get('/dish/list')
+    const res = await http.get('/menu/items')
     localMenuItems.value = res.data.data || []
   } catch (err) {
     console.error('加载菜单失败', err)
