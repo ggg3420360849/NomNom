@@ -8,9 +8,7 @@ import axios from 'axios'
 const router = useRouter()
 const app = useNomNomApp()
 
-// ==========================
-// axios 配置（连接后端）
-// ==========================
+// axios 配置
 const http = axios.create({
   baseURL: '/api',
   timeout: 10000
@@ -33,27 +31,55 @@ function doRecharge() {
   rechargeVisible.value = false
 }
 
-// 菜品详情弹窗
+// 菜品详情弹窗 + 推荐搭配
 const detailVisible = ref(false)
 const currentDish = ref({})
+const recommendList = ref([])
 
-function openDetail(item) {
+async function openDetail(item) {
   currentDish.value = item
   detailVisible.value = true
+  try {
+    const res = await http.get(`/menu/recommend/${item.id}`)
+    recommendList.value = res.data.data || []
+  } catch (err) {
+    recommendList.value = []
+  }
+}
+
+function closeDetailModal() {
+  detailVisible.value = false
+  recommendList.value = []
 }
 
 // 订单小票弹窗
 const orderReceiptVisible = ref(false)
 const orderInfo = ref({})
 
-// ==========================
-// 从后端加载真实菜品 
-// ==========================
+// 分类（用 ID）
+const categoryList = ref([])
+const activeCategory = ref(null) // 这里存分类 ID
+
+// 获取分类
+async function loadCategory() {
+  try {
+    const res = await http.get('/menu/categories')
+    categoryList.value = res.data.data || []
+  } catch (err) {
+    console.error('加载分类失败', err)
+  }
+}
+
+// 加载菜品（按 typeId 查询）
 const localMenuItems = ref([])
 
 async function loadMenu() {
   try {
-    const res = await http.get('/menu/items')
+    const params = {}
+    if (activeCategory.value != null) {
+      params.category = activeCategory.value // 传分类 ID
+    }
+    const res = await http.get('/menu/items', { params })
     localMenuItems.value = res.data.data || []
   } catch (err) {
     console.error('加载菜单失败', err)
@@ -61,21 +87,23 @@ async function loadMenu() {
   }
 }
 
-// 分类 + 搜索
-const activeCategory = ref('')
+// 搜索筛选
 const keyword = ref('')
 const filteredMenuItems = computed(() => {
   return localMenuItems.value.filter(item => {
-    // 状态必须是可售卖
-    if (item.status !== 'AVAILABLE') return false
-
-    const c = activeCategory.value ? item.category === activeCategory.value : true
-    const k = keyword.value
-      ? item.name.includes(keyword.value) || (item.description || '').includes(keyword.value)
-      : true
-    return c && k
+    if (item.status !== 'AVAILABLE' && item.status !== 1) return false
+    const keyMatch = keyword.value
+        ? item.name.includes(keyword.value) || (item.detail || '').includes(keyword.value)
+        : true
+    return keyMatch
   })
 })
+
+// 切换分类（传 ID）
+function changeCategory(catId) {
+  activeCategory.value = catId
+  loadMenu()
+}
 
 // 购物车
 const cart = ref([])
@@ -109,7 +137,7 @@ function handleSubmit() {
     balance: Number((wallet.value - cartTotal.value).toFixed(2))
   }
 
-  wallet.value = orderInfo.value.balance
+  wallet.value = orderInfo.balance
   orderReceiptVisible.value = true
   cart.value = []
 }
@@ -119,11 +147,10 @@ async function exitPortal() {
   await router.push('/login')
 }
 
-// ==========================
-// 页面打开加载菜单 
-// ==========================
+// 初始化
 onMounted(() => {
   app.loadPortalData()
+  loadCategory()
   loadMenu()
 })
 </script>
@@ -131,70 +158,56 @@ onMounted(() => {
 <template>
   <div class="portal-shell">
     <PortalHeader
-      title="顾客端点餐台"
-      :display-name="app.displayName.value"
-      :role-label="app.currentUser.value.roleLabel"
-      :loading="app.pageLoading.value"
-      @logout="exitPortal"
+        title="顾客端点餐台"
+        :display-name="app.displayName.value"
+        :role-label="app.currentUser.value.roleLabel"
+        :loading="app.pageLoading.value"
+        @logout="exitPortal"
     />
 
-    <!-- 余额 + 充值 -->
     <div class="wallet-bar">
       <span>余额：¥{{ wallet.toFixed(2) }}</span>
       <button class="recharge-btn" @click="openRechargeDialog">充值</button>
     </div>
 
-    <!-- 主体布局：左侧分类 + 中间菜单 + 底部购物车 -->
     <div class="main-layout">
-      <!-- 左侧垂直分类栏 -->
+      <!-- 左侧分类栏 -->
       <aside class="category-sidebar">
-        <button 
-          class="category-btn" 
-          :class="{ active: activeCategory === '' }" 
-          @click="activeCategory = ''"
+        <button
+            class="category-btn"
+            :class="{ active: activeCategory === null }"
+            @click="changeCategory(null)"
         >
           全部
         </button>
-        <button 
-          class="category-btn" 
-          :class="{ active: activeCategory === 'rice' }" 
-          @click="activeCategory = 'rice'"
+        <button
+            v-for="cat in categoryList"
+            :key="cat.code"
+            class="category-btn"
+            :class="{ active: activeCategory === cat.code }"
+            @click="changeCategory(cat.code)"
         >
-          主食
-        </button>
-        <button 
-          class="category-btn" 
-          :class="{ active: activeCategory === 'snack' }" 
-          @click="activeCategory = 'snack'"
-        >
-          小吃
-        </button>
-        <button 
-          class="category-btn" 
-          :class="{ active: activeCategory === 'drink' }" 
-          @click="activeCategory = 'drink'"
-        >
-          饮品
+          {{ cat.name }}
         </button>
       </aside>
 
-      <!-- 中间菜单区域 -->
+      <!-- 菜单 -->
       <section class="menu-area">
         <div class="search-box">
-          <input 
-            v-model.lazy="keyword" 
-            class="search-input" 
-            type="text" 
-            placeholder="搜索菜品或套餐" 
+          <input
+              v-model.lazy="keyword"
+              class="search-input"
+              type="text"
+              placeholder="搜索菜品或套餐"
           />
         </div>
 
         <div class="menu-list">
-          <article 
-            v-for="item in filteredMenuItems" 
-            :key="item.id" 
-            class="menu-card"
-            @click="openDetail(item)"
+          <article
+              v-for="item in filteredMenuItems"
+              :key="item.id"
+              class="menu-card"
+              @click="openDetail(item)"
           >
             <img :src="item.coverUrl" class="menu-image" />
             <h3 class="menu-title">{{ item.name }}</h3>
@@ -205,17 +218,17 @@ onMounted(() => {
       </section>
     </div>
 
-    <!-- 底部固定购物车结算栏 -->
+    <!-- 底部购物车 -->
     <footer class="cart-footer">
       <div class="cart-summary">
         <div class="cart-info">
           <span class="cart-count">共 {{ cartCount }} 件</span>
           <span class="cart-total">合计：¥{{ cartTotal.toFixed(2) }}</span>
         </div>
-        <button 
-          class="submit-btn" 
-          :disabled="cartCount === 0 || wallet < cartTotal"
-          @click="handleSubmit"
+        <button
+            class="submit-btn"
+            :disabled="cartCount === 0 || wallet < cartTotal"
+            @click="handleSubmit"
         >
           提交订单
         </button>
@@ -249,25 +262,39 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 菜品详情弹窗 -->
-    <div v-if="detailVisible" class="modal-overlay" @click.self="detailVisible = false">
+    <!-- 菜品详情 -->
+    <div v-if="detailVisible" class="modal-overlay" @click.self="closeDetailModal">
       <div class="modal modal-lg">
         <img :src="currentDish.coverUrl" class="detail-img" />
         <h3>{{ currentDish.name }}</h3>
-        <p>{{ currentDish.description }}</p>
+        <p>{{ currentDish.detail }}</p>
         <p class="detail-price">¥{{ currentDish.price.toFixed(2) }}</p>
         <button class="primary-button" @click="addToCart(currentDish)">加入购物车</button>
+
+        <div class="recommend-wrap">
+          <h4 class="recommend-title">推荐搭配</h4>
+          <div class="recommend-list">
+            <div v-if="recommendList.length === 0" class="no-recommend">暂无</div>
+            <div v-for="rec in recommendList" :key="rec.id" class="recommend-item">
+              <img :src="rec.coverUrl" class="rec-img" />
+              <div class="rec-info">
+                <div class="rec-name">{{ rec.name }}</div>
+                <div class="rec-price">¥{{ rec.price.toFixed(2) }}</div>
+              </div>
+              <button class="rec-add-btn" @click="addToCart(rec)">+</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- 订单小票弹窗 -->
+    <!-- 订单小票 -->
     <div v-if="orderReceiptVisible" class="modal-overlay" @click.self="orderReceiptVisible = false">
       <div class="modal receipt-modal">
         <div class="receipt-header">
           <h3>订单支付成功</h3>
           <p>{{ orderInfo.time }}</p>
         </div>
-
         <div class="receipt-body">
           <div class="receipt-item" v-for="(item, idx) in orderInfo.items" :key="idx">
             <div class="name">{{ item.name }}</div>
@@ -275,34 +302,29 @@ onMounted(() => {
             <div class="sub">¥{{ (item.price * item.quantity).toFixed(2) }}</div>
           </div>
         </div>
-
-        <div class="receipt-footer">
-          <div class="line"></div>
-          <div class="total-row">
-            <span>实付金额</span>
-            <span>¥{{ orderInfo.total.toFixed(2) }}</span>
-          </div>
-          <div class="balance-row">
-            <span>剩余余额</span>
-            <span>¥{{ orderInfo.balance.toFixed(2) }}</span>
-          </div>
-          <button class="close-btn" @click="orderReceiptVisible = false">完成</button>
+        <div class="line"></div>
+        <div class="total-row">
+          <span>实付金额</span>
+          <span>¥{{ orderInfo.total }}</span>
         </div>
+        <div class="balance-row">
+          <span>剩余余额</span>
+          <span>¥{{ orderInfo.balance }}</span>
+        </div>
+        <button class="close-btn" @click="orderReceiptVisible = false">完成</button>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* 全局样式 */
+/* 样式完全不变，保持你原来的样式 */
 .portal-shell {
   display: flex;
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
 }
-
-/* 余额栏 */
 .wallet-bar {
   display: flex;
   justify-content: space-between;
@@ -319,15 +341,11 @@ onMounted(() => {
   border-radius: 4px;
   cursor: pointer;
 }
-
-/* 主体布局：左侧分类 + 中间菜单 */
 .main-layout {
   display: flex;
   flex: 1;
   overflow: hidden;
 }
-
-/* 左侧垂直分类栏 */
 .category-sidebar {
   width: 80px;
   background: #fafafa;
@@ -349,8 +367,6 @@ onMounted(() => {
   color: #1890ff;
   border-left: 3px solid #1890ff;
 }
-
-/* 中间菜单区域 */
 .menu-area {
   flex: 1;
   display: flex;
@@ -368,7 +384,6 @@ onMounted(() => {
   border-radius: 8px;
   box-sizing: border-box;
 }
-
 .menu-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
@@ -420,8 +435,6 @@ onMounted(() => {
   justify-content: center;
   cursor: pointer;
 }
-
-/* 底部固定购物车栏 */
 .cart-footer {
   background: #fff;
   border-top: 1px solid #eee;
@@ -457,7 +470,6 @@ onMounted(() => {
   background: #ccc;
   cursor: not-allowed;
 }
-
 .cart-items {
   max-height: 150px;
   overflow-y: auto;
@@ -502,8 +514,6 @@ onMounted(() => {
   color: #999;
   padding: 10px 0;
 }
-
-/* 弹窗样式 */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -519,9 +529,9 @@ onMounted(() => {
   border-radius: 8px;
   width: 320px;
 }
-.modal-lg { 
-  width: 460px; 
-  max-height: 80vh; 
+.modal-lg {
+  width: 460px;
+  max-height: 80vh;
   overflow-y: auto;
 }
 .detail-img {
@@ -543,8 +553,65 @@ onMounted(() => {
   border-radius: 6px;
   cursor: pointer;
 }
-
-/* 订单小票样式 */
+.recommend-wrap {
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 1px solid #eee;
+}
+.recommend-title {
+  font-size: 15px;
+  margin: 0 0 12px;
+  color: #333;
+}
+.recommend-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.no-recommend {
+  color: #999;
+  font-size: 13px;
+  padding: 5px 0;
+}
+.recommend-item {
+  display: flex;
+  align-items: center;
+  width: 180px;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  padding: 6px;
+}
+.rec-img {
+  width: 50px;
+  height: 50px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+.rec-info {
+  flex: 1;
+  padding: 0 8px;
+}
+.rec-name {
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+.rec-price {
+  font-size: 12px;
+  color: #f53f3f;
+}
+.rec-add-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: #1890ff;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .receipt-modal {
   width: 380px;
   padding: 24px;
