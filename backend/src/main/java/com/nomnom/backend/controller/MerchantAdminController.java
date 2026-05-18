@@ -3,17 +3,25 @@ package com.nomnom.backend.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.nomnom.backend.common.ApiResponse;
 import com.nomnom.backend.entity.DishesEntity;
+import com.nomnom.backend.entity.DishesEvaluationsEntity;
 import com.nomnom.backend.entity.DishesPackageEntity;
 import com.nomnom.backend.entity.DishesTableEntity;
 import com.nomnom.backend.entity.DishesTypeEntity;
+import com.nomnom.backend.entity.ImagesEntity;
 import com.nomnom.backend.entity.OrdersEntity;
 import com.nomnom.backend.entity.OrdersItemEntity;
+import com.nomnom.backend.entity.OrdersRefundReplyEntity;
+import com.nomnom.backend.entity.UserEntity;
+import com.nomnom.backend.mapper.DishesEvaluationsMapper;
 import com.nomnom.backend.mapper.DishesMapper;
 import com.nomnom.backend.mapper.DishesPackageMapper;
 import com.nomnom.backend.mapper.DishesTableMapper;
 import com.nomnom.backend.mapper.DishesTypeMapper;
+import com.nomnom.backend.mapper.ImagesMapper;
 import com.nomnom.backend.mapper.OrdersItemMapper;
 import com.nomnom.backend.mapper.OrdersMapper;
+import com.nomnom.backend.mapper.OrdersRefundReplyMapper;
+import com.nomnom.backend.mapper.UserMapper;
 import com.nomnom.backend.model.AddDishRequest;
 import com.nomnom.backend.model.DishDetailResponse;
 import com.nomnom.backend.model.DashboardResponse;
@@ -27,6 +35,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -43,11 +52,18 @@ public class MerchantAdminController {
     private final DishesTypeMapper typeMapper;
     private final OrdersMapper ordersMapper;
     private final OrdersItemMapper ordersItemMapper;
+    private final OrdersRefundReplyMapper refundMapper;
+    private final DishesEvaluationsMapper evaluationsMapper;
+    private final UserMapper userMapper;
+    private final ImagesMapper imagesMapper;
     private final ObjectMapper objectMapper;
 
     public MerchantAdminController(DishesMapper dishesMapper, DishesTableMapper tableMapper,
                                    DishesPackageMapper packageMapper, DishesTypeMapper typeMapper,
                                    OrdersMapper ordersMapper, OrdersItemMapper ordersItemMapper,
+                                   OrdersRefundReplyMapper refundMapper,
+                                   DishesEvaluationsMapper evaluationsMapper,
+                                   UserMapper userMapper, ImagesMapper imagesMapper,
                                    ObjectMapper objectMapper) {
         this.dishesMapper = dishesMapper;
         this.tableMapper = tableMapper;
@@ -55,6 +71,10 @@ public class MerchantAdminController {
         this.typeMapper = typeMapper;
         this.ordersMapper = ordersMapper;
         this.ordersItemMapper = ordersItemMapper;
+        this.refundMapper = refundMapper;
+        this.evaluationsMapper = evaluationsMapper;
+        this.userMapper = userMapper;
+        this.imagesMapper = imagesMapper;
         this.objectMapper = objectMapper;
     }
 
@@ -92,6 +112,8 @@ public class MerchantAdminController {
             r.setPrice(priceMap.getOrDefault(d.getId().longValue(), BigDecimal.ZERO));
             r.setMemberPrice(d.getMemberPrice());
             r.setSpecs(d.getSpecs());
+            r.setIsRecommend(d.getIsRecommend());
+            r.setRecommendIds(d.getRecommendIds());
             r.setCreateTime(d.getCreateTime());
             return r;
         }).collect(Collectors.toList());
@@ -355,6 +377,153 @@ public class MerchantAdminController {
         return ApiResponse.ok("删除成功", null);
     }
 
+    // ==================== 审核管理 ====================
+
+    @GetMapping("/audits")
+    public ApiResponse<List<Map<String, Object>>> listAudits() {
+        List<OrdersRefundReplyEntity> refunds = refundMapper.selectList(
+                new LambdaQueryWrapper<OrdersRefundReplyEntity>()
+                        .eq(OrdersRefundReplyEntity::getStatus, 2)
+                        .orderByDesc(OrdersRefundReplyEntity::getCreateTime));
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (OrdersRefundReplyEntity r : refunds) {
+            OrdersEntity order = ordersMapper.selectById(r.getOrdersId());
+            Map<String, Object> audit = new LinkedHashMap<>();
+            audit.put("id", r.getId());
+            audit.put("type", "REFUND");
+            audit.put("desc", "订单#" + (order != null ? order.getCode() : r.getOrdersId())
+                    + " " + (r.getRefundCause() != null ? r.getRefundCause() : ""));
+            audit.put("status", "PENDING");
+            result.add(audit);
+        }
+        return ApiResponse.ok(result);
+    }
+
+    @PutMapping("/audit/{id}")
+    public ApiResponse<Void> auditAction(@PathVariable Long id, @RequestParam Boolean approved) {
+        OrdersRefundReplyEntity entity = refundMapper.selectById(id);
+        if (entity == null) {
+            return ApiResponse.fail("审核项不存在");
+        }
+        if (approved) {
+            entity.setStatus(3);
+            entity.setRefunTime(LocalDateTime.now());
+            refundMapper.updateById(entity);
+            return ApiResponse.ok("审批已通过", null);
+        } else {
+            entity.setStatus(4);
+            entity.setRefunTime(LocalDateTime.now());
+            refundMapper.updateById(entity);
+            return ApiResponse.ok("申请已驳回", null);
+        }
+    }
+
+    // ==================== 财务对账 ====================
+
+    @GetMapping("/finance/reconciliation")
+    public ApiResponse<List<Map<String, Object>>> reconciliation() {
+        List<OrdersEntity> orders = ordersMapper.selectList(
+                new LambdaQueryWrapper<OrdersEntity>()
+                        .orderByDesc(OrdersEntity::getCreateTime));
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (OrdersEntity o : orders) {
+            Map<String, Object> rec = new LinkedHashMap<>();
+            rec.put("id", o.getId());
+            rec.put("orderAmt", o.getTotalPrice() != null ? o.getTotalPrice() : BigDecimal.ZERO);
+            rec.put("flowAmt", o.getTotalPrice() != null ? o.getTotalPrice() : BigDecimal.ZERO);
+            result.add(rec);
+        }
+        return ApiResponse.ok(result);
+    }
+
+    // ==================== 评价管理 ====================
+
+    @GetMapping("/reviews")
+    public ApiResponse<List<Map<String, Object>>> listReviews() {
+        List<DishesEvaluationsEntity> evaluations = evaluationsMapper.selectList(
+                new LambdaQueryWrapper<DishesEvaluationsEntity>()
+                        .orderByDesc(DishesEvaluationsEntity::getCreateTime));
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (DishesEvaluationsEntity ev : evaluations) {
+            UserEntity user = userMapper.selectById(ev.getUserId());
+            DishesEntity dish = dishesMapper.selectById(ev.getDishesId());
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("id", ev.getId());
+            r.put("user", user != null ? (user.getUsername() != null ? user.getUsername() : user.getAccount()) : "未知用户");
+            r.put("dishName", dish != null ? dish.getName() : "未知菜品");
+            r.put("rating", ev.getRatingValue());
+            r.put("content", ev.getContent());
+            r.put("reply", ev.getReplyContent());
+            result.add(r);
+        }
+        return ApiResponse.ok(result);
+    }
+
+    @PostMapping("/reviews/{id}/reply")
+    public ApiResponse<Void> replyToReview(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        DishesEvaluationsEntity entity = evaluationsMapper.selectById(id);
+        if (entity == null) {
+            return ApiResponse.fail("评价不存在");
+        }
+        String replyContent = body.get("reply");
+        if (replyContent == null || replyContent.trim().isEmpty()) {
+            return ApiResponse.fail("回复内容不能为空");
+        }
+        entity.setReplyContent(replyContent.trim());
+        entity.setReplyTime(LocalDateTime.now());
+        entity.setReplyStatus(1);
+        evaluationsMapper.updateById(entity);
+        return ApiResponse.ok("回复成功", null);
+    }
+
+    @Transactional
+    @DeleteMapping("/reviews/{id}")
+    public ApiResponse<Void> deleteReview(@PathVariable Long id) {
+        if (evaluationsMapper.selectById(id) == null) {
+            return ApiResponse.fail("评价不存在");
+        }
+        imagesMapper.delete(new LambdaQueryWrapper<ImagesEntity>()
+                .eq(ImagesEntity::getDishesEvaluationsId, id.intValue()));
+        evaluationsMapper.deleteById(id);
+        return ApiResponse.ok("评价已删除", null);
+    }
+
+    // ==================== 统计分析 ====================
+
+    @GetMapping("/stats")
+    public ApiResponse<List<Map<String, Object>>> stats() {
+        List<OrdersItemEntity> allItems = ordersItemMapper.selectList(null);
+
+        Map<String, Map<String, Object>> dishStats = new LinkedHashMap<>();
+        for (OrdersItemEntity item : allItems) {
+            String name = item.getSnapName() != null ? item.getSnapName().split(" - ")[0] : "未知";
+            Map<String, Object> entry = dishStats.computeIfAbsent(name, k -> {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("name", k);
+                m.put("sales", 0);
+                m.put("revenue", BigDecimal.ZERO);
+                return m;
+            });
+            int qty = item.getBuyNumber() != null ? item.getBuyNumber() : 0;
+            entry.put("sales", (int) entry.get("sales") + qty);
+            BigDecimal itemRevenue = (item.getSnapPrice() != null ? item.getSnapPrice() : BigDecimal.ZERO)
+                    .multiply(BigDecimal.valueOf(qty));
+            entry.put("revenue", ((BigDecimal) entry.get("revenue")).add(itemRevenue));
+        }
+
+        List<Map<String, Object>> result = dishStats.values().stream()
+                .sorted((a, b) -> Integer.compare((int) b.get("sales"), (int) a.get("sales")))
+                .collect(Collectors.toList());
+
+        for (int i = 0; i < result.size(); i++) {
+            result.get(i).put("rank", i + 1);
+        }
+        return ApiResponse.ok(result);
+    }
+
     // ==================== 内部方法 ====================
 
     private String normalizeRequiredText(String value) {
@@ -377,6 +546,8 @@ public class MerchantAdminController {
         dish.setStatus(request.getStatus() != null ? request.getStatus() : 1);
         dish.setStock(request.getStock() != null ? request.getStock() : 999);
         dish.setMemberPrice(request.getMemberPrice());
+        dish.setIsRecommend(request.getIsRecommend());
+        dish.setRecommendIds(request.getRecommendIds());
         dish.setSpecs(buildSpecsJson(request));
     }
 
@@ -406,6 +577,8 @@ public class MerchantAdminController {
         d.setStock(dish.getStock());
         d.setMemberPrice(dish.getMemberPrice());
         d.setSpecs(dish.getSpecs());
+        d.setIsRecommend(dish.getIsRecommend());
+        d.setRecommendIds(dish.getRecommendIds());
         d.setCreateTime(dish.getCreateTime());
         d.setPackages(packages);
         return d;

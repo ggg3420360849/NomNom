@@ -24,6 +24,9 @@ public class DishesEntity {
     private BigDecimal memberPrice; // 会员价
     private String specs;           // 规格口味 (JSON格式字符串)
 
+    private Integer isRecommend;    // 是否店长推荐
+    private String recommendIds;    // 推荐搭配菜品ID (JSON数组字符串)
+
 
     // ==========================================
     // 下面是 Getter 和 Setter 方法 (如果没有用 Lombok，必须要有这些)
@@ -108,4 +111,10 @@ public class DishesEntity {
     public void setSpecs(String specs) {
         this.specs = specs;
     }
+
+    public Integer getIsRecommend() { return isRecommend; }
+    public void setIsRecommend(Integer isRecommend) { this.isRecommend = isRecommend; }
+
+    public String getRecommendIds() { return recommendIds; }
+    public void setRecommendIds(String recommendIds) { this.recommendIds = recommendIds; }
 }

@@ -255,6 +255,12 @@ values (3, 'merchant1', '商家甲', '$2b$10$9FOQgf7wwoVm7tRWNdtoyOA/YsHUk9bcKS/
 insert into user (id, account, username, password, avatar, email, role, gender, birthday, phone, create_time)
 values (2, '1234567', 'bbb', '$2b$10$wxW1d5pgB.QmGpuA6N4RH.o7rZLmYHmTzMCzO5UB0qOPNAHX4bLcG', null, null, 1, null, null, null, '2026-05-08 21:00:24');
 
+-- 3. 升级购物车表：增加 dishes_id 冗余菜品ID避免多层JOIN
+ALTER TABLE shopping_car ADD COLUMN dishes_id INT COMMENT '菜品ID，冗余字段便于列表展示';
+
+-- 4. 升级菜品评价表：增加 orders_id 关联订单
+ALTER TABLE dishes_evaluations ADD COLUMN orders_id INT COMMENT '关联订单ID，防止刷评';
+
 -- 1. 升级桌台表：增加区域、当前消费金额、最低消费
 ALTER TABLE dishes_table ADD COLUMN area VARCHAR(50) COMMENT '所属区域：大厅/包间/二楼等';
 ALTER TABLE dishes_table ADD COLUMN amount DECIMAL(10, 2) DEFAULT 0.00 COMMENT '当前桌台消费总额';
@@ -264,3 +270,7 @@ ALTER TABLE dishes_table ADD COLUMN min_spend DECIMAL(10, 2) DEFAULT 0.00 COMMEN
 ALTER TABLE dishes ADD COLUMN stock INT DEFAULT 999 COMMENT '库存数量';
 ALTER TABLE dishes ADD COLUMN member_price DECIMAL(10, 2) COMMENT '会员特价';
 ALTER TABLE dishes ADD COLUMN specs TEXT COMMENT '菜品规格口味，存储为JSON字符串';
+
+-- 5. 升级菜品表：增加推荐字段
+ALTER TABLE dishes ADD COLUMN is_recommend TINYINT(1) DEFAULT 0 COMMENT '是否店长推荐（0：否；1：是）';
+ALTER TABLE dishes ADD COLUMN recommend_ids TEXT COMMENT '推荐搭配菜品ID列表，JSON数组格式';

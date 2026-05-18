@@ -508,7 +508,8 @@ onMounted(() => {
               </div>
             </div>
 
-            <div class="form-group span-2"><label>上传主图</label><input type="file" @change="handleImageUpload" accept="image/*" /></div>
+            <div class="form-group span-2"><label>上传主图</label><input type="file" @change="handleImageUpload" accept="image/*" />
+              <img v-if="dishForm.cover_url" :src="dishForm.cover_url" class="upload-preview" /></div>
           </div>
         </div>
         <div class="modal-footer"><button class="btn-cancel" @click="showDishModal = false">取消</button><button class="btn-primary" @click="saveDish">保存发布</button></div>
@@ -641,4 +642,5 @@ onMounted(() => {
 .btn-cancel:hover { background: #f5f5f5; }
 .btn-link { background: none; border: none; color: #f57c00; cursor: pointer; margin-right: 8px; font-weight: 500;}
 .btn-link.danger { color: #d32f2f; }
+.upload-preview { width: 120px; height: 120px; object-fit: cover; border-radius: 6px; margin-top: 8px; border: 1px solid #e0d4c3; }
 </style>
