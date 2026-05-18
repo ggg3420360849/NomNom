@@ -13,7 +13,7 @@ public class WebConfig implements WebMvcConfigurer {
 
     private final JwtInterceptor jwtInterceptor;
 
-    @Value("${nomnom.upload-path:backend/uploads}")
+    @Value("${nomnom.upload-path:uploads}")
     private String uploadPath;
 
     public WebConfig(JwtInterceptor jwtInterceptor) {
@@ -23,8 +23,12 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(jwtInterceptor)
-                .addPathPatterns("/api/orders/**", "/api/admin/**", "/api/common/**")
-                .excludePathPatterns();
+                .addPathPatterns(
+                        "/api/orders/**", "/api/admin/**", "/api/common/**",
+                        "/api/cart/**", "/api/collection/**",
+                        "/api/messages/**", "/api/refunds/**",
+                        "/api/wallet/**")
+                .excludePathPatterns("/api/evaluations/**");
     }
 
     @Override

@@ -55,3 +55,7 @@ backend/uploads/
 
 # local claude config
 .claude/settings.local.json
+
+# local dev tooling
+CLAUDE.md
+sync.bat

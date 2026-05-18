@@ -17,6 +17,8 @@ public class DishDetailResponse {
     private Integer stock;
     private BigDecimal memberPrice;
     private String specs;
+    private Integer isRecommend;
+    private String recommendIds;
     private Date createTime;
     private List<DishesPackageEntity> packages;
 
@@ -52,4 +54,10 @@ public class DishDetailResponse {
 
     public List<DishesPackageEntity> getPackages() { return packages; }
     public void setPackages(List<DishesPackageEntity> packages) { this.packages = packages; }
+
+    public Integer getIsRecommend() { return isRecommend; }
+    public void setIsRecommend(Integer isRecommend) { this.isRecommend = isRecommend; }
+
+    public String getRecommendIds() { return recommendIds; }
+    public void setRecommendIds(String recommendIds) { this.recommendIds = recommendIds; }
 }

@@ -66,7 +66,7 @@ const filteredTables = computed(() => {
   return tableList.value.filter(t => t.area === selectedArea.value)
 })
 
-// === 菜品管理 (包含推荐搭配功能) ===
+// === 菜品管理 ===
 const showDishModal = ref(false)
 const editingId = ref(null)
 const dishList = ref([])
@@ -90,10 +90,23 @@ function openAddModal() {
 
 function openEditModal(dish) {
   editingId.value = dish.id
+
+  // ★ 核心修复点 1：将后端返回的 JSON 字符串解析成 Vue 能看懂的真正的数组 ★
+  let parsedRecs = []
+  try {
+    if (typeof dish.recommendIds === 'string') {
+      parsedRecs = JSON.parse(dish.recommendIds)
+    } else if (Array.isArray(dish.recommendIds)) {
+      parsedRecs = dish.recommendIds
+    }
+  } catch (e) {
+    parsedRecs = []
+  }
+
   Object.assign(dishForm, {
     name: dish.name || '', type_id: dish.typeId || null, price: dish.price || 0, memberPrice: dish.memberPrice || 0,
     stock: dish.stock || 99, status: dish.status ?? 1, cover_url: dish.coverUrl || '', isRecommend: dish.isRecommend || 0,
-    recommend_ids: dish.recommendIds || []
+    recommend_ids: parsedRecs // 绑定解析出来的真实数组，复选框就会自动亮起！
   })
   showDishModal.value = true
 }
@@ -156,8 +169,13 @@ const handleImageUpload = async (event) => {
 
 const saveDish = async () => {
   try {
-    if (editingId.value) await merchantApi.updateDish(editingId.value, dishForm)
-    else await merchantApi.addDish(dishForm)
+    // ★ 核心修复点 2：在保存给后端前，把数组转换成字符串 ★
+    const payload = { ...dishForm }
+    payload.recommendIds = JSON.stringify(dishForm.recommend_ids)
+
+    if (editingId.value) await merchantApi.updateDish(editingId.value, payload)
+    else await merchantApi.addDish(payload)
+
     showToast('菜品保存成功'); showDishModal.value = false; resetDishForm(); await fetchDishes()
   } catch { showToast('保存失败') }
 };
@@ -292,7 +310,6 @@ onMounted(() => {
 
             <div class="category-accordion">
               <div v-for="(cat, index) in categoryList" :key="cat.id" class="cat-panel">
-
                 <div class="cat-header" @click="toggleCategoryExpand(cat.id)">
                   <div class="cat-title">
                     <span class="cat-index">{{ index + 1 }}</span>
@@ -302,12 +319,10 @@ onMounted(() => {
                   <div class="cat-actions">
                     <button class="btn-link" @click.stop="editCategory(cat)">重命名</button>
                     <button class="btn-link danger" @click.stop="removeCategory(cat)">整类移除</button>
-
                     <span class="expand-wrapper" :class="{ 'is-expanded': expandedCategoryIds.has(cat.id) }">
                       {{ expandedCategoryIds.has(cat.id) ? '收起列表' : '展开菜品' }}
                       <i class="expand-icon">▼</i>
                     </span>
-
                   </div>
                 </div>
 
@@ -330,14 +345,12 @@ onMounted(() => {
                   </table>
                   <div v-else class="empty-hint">此分类下空空如也，快去【菜品库管理】给它添加商品吧~</div>
                 </div>
-
               </div>
 
               <div v-if="categoryList.length === 0" class="empty-hint" style="padding: 40px;">
                 当前数据库中没有任何分类数据，请点击上方预设词条一键导入！
               </div>
             </div>
-
           </div>
         </div>
 
@@ -495,7 +508,8 @@ onMounted(() => {
               </div>
             </div>
 
-            <div class="form-group span-2"><label>上传主图</label><input type="file" @change="handleImageUpload" accept="image/*" /></div>
+            <div class="form-group span-2"><label>上传主图</label><input type="file" @change="handleImageUpload" accept="image/*" />
+              <img v-if="dishForm.cover_url" :src="dishForm.cover_url" class="upload-preview" /></div>
           </div>
         </div>
         <div class="modal-footer"><button class="btn-cancel" @click="showDishModal = false">取消</button><button class="btn-primary" @click="saveDish">保存发布</button></div>
@@ -588,7 +602,6 @@ onMounted(() => {
 .cat-name { font-size: 16px; font-weight: bold; color: #4e342e; }
 .cat-actions { display: flex; align-items: center; gap: 12px; }
 
-/* ★ 修复点：分离文字与图标的旋转控制 ★ */
 .expand-wrapper { font-size: 13px; color: #8d6e63; display: flex; align-items: center; gap: 6px; transition: 0.2s; margin-left: 8px; }
 .expand-wrapper.is-expanded { color: #f57c00; font-weight: bold; }
 .expand-icon { transition: transform 0.3s; display: inline-block; font-size: 11px; }
@@ -629,4 +642,5 @@ onMounted(() => {
 .btn-cancel:hover { background: #f5f5f5; }
 .btn-link { background: none; border: none; color: #f57c00; cursor: pointer; margin-right: 8px; font-weight: 500;}
 .btn-link.danger { color: #d32f2f; }
+.upload-preview { width: 120px; height: 120px; object-fit: cover; border-radius: 6px; margin-top: 8px; border: 1px solid #e0d4c3; }
 </style>

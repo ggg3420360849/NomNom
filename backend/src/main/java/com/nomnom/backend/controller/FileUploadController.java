@@ -14,22 +14,21 @@ import java.util.UUID;
 @RequestMapping("/api/common")
 public class FileUploadController {
 
-    @Value("${nomnom.upload-path:backend/uploads}")
+    @Value("${nomnom.upload-path:uploads}")
     private String uploadPath;
 
     @PostMapping("/upload")
     public ApiResponse<String> upload(@RequestParam("file") MultipartFile file) {
         if (file.isEmpty()) {
-            return ApiResponse.fail("文件不能为空"); // 改为了你的 fail 方法
+            return ApiResponse.fail("文件不能为空");
         }
 
         String fileName = UUID.randomUUID() + "_" + file.getOriginalFilename();
-        File dest = Paths.get(uploadPath, fileName).toFile();
+        File dest = Paths.get(uploadPath).toAbsolutePath().resolve(fileName).toFile();
 
         try {
             if (!dest.getParentFile().exists()) dest.getParentFile().mkdirs();
             file.transferTo(dest);
-            // 改为了你的 ok 方法
             return ApiResponse.ok("上传成功", "/uploads/" + fileName);
         } catch (IOException e) {
             return ApiResponse.fail("上传失败: " + e.getMessage());

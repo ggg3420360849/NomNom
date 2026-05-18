@@ -21,6 +21,8 @@ public class AddDishRequest {
     private Integer stock;
     private BigDecimal price;
     private BigDecimal memberPrice;
+    private Integer isRecommend;
+    private String recommendIds;
     private List<String> specs;
     private List<String> tastes;
 
@@ -47,6 +49,12 @@ public class AddDishRequest {
 
     public BigDecimal getMemberPrice() { return memberPrice; }
     public void setMemberPrice(BigDecimal memberPrice) { this.memberPrice = memberPrice; }
+
+    public Integer getIsRecommend() { return isRecommend; }
+    public void setIsRecommend(Integer isRecommend) { this.isRecommend = isRecommend; }
+
+    public String getRecommendIds() { return recommendIds; }
+    public void setRecommendIds(String recommendIds) { this.recommendIds = recommendIds; }
 
     public List<String> getSpecs() { return specs; }
     public void setSpecs(List<String> specs) { this.specs = specs; }

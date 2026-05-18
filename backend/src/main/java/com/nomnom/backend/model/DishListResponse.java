@@ -16,6 +16,8 @@ public class DishListResponse {
     private BigDecimal price;
     private BigDecimal memberPrice;
     private String specs;
+    private Integer isRecommend;
+    private String recommendIds;
     private Date createTime;
 
     public Integer getId() { return id; }
@@ -53,4 +55,10 @@ public class DishListResponse {
 
     public Date getCreateTime() { return createTime; }
     public void setCreateTime(Date createTime) { this.createTime = createTime; }
+
+    public Integer getIsRecommend() { return isRecommend; }
+    public void setIsRecommend(Integer isRecommend) { this.isRecommend = isRecommend; }
+
+    public String getRecommendIds() { return recommendIds; }
+    public void setRecommendIds(String recommendIds) { this.recommendIds = recommendIds; }
 }

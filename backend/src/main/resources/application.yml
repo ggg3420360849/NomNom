@@ -26,4 +26,4 @@ jwt:
   expiration: 86400
 
 nomnom:
-  upload-path: ${NOMNOM_UPLOAD_PATH:backend/uploads}
+  upload-path: ${NOMNOM_UPLOAD_PATH:uploads}
