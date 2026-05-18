@@ -190,6 +190,15 @@ public class MerchantAdminController {
 
     @PostMapping("/categories")
     public ApiResponse<Void> addCategory(@RequestBody DishesTypeEntity category) {
+        String name = normalizeRequiredText(category != null ? category.getName() : null);
+        if (name.isEmpty()) {
+            return ApiResponse.fail("分类名称不能为空");
+        }
+        if (category == null) {
+            category = new DishesTypeEntity();
+        }
+        category.setName(name);
+        category.setIconUri(normalizeOptionalText(category.getIconUri()));
         typeMapper.insert(category);
         return ApiResponse.ok("新增成功", null);
     }
@@ -200,8 +209,12 @@ public class MerchantAdminController {
         if (existing == null) {
             return ApiResponse.fail("分类不存在");
         }
-        existing.setName(category.getName());
-        existing.setIconUri(category.getIconUri());
+        String name = normalizeRequiredText(category != null ? category.getName() : null);
+        if (name.isEmpty()) {
+            return ApiResponse.fail("分类名称不能为空");
+        }
+        existing.setName(name);
+        existing.setIconUri(normalizeOptionalText(category.getIconUri()));
         typeMapper.updateById(existing);
         return ApiResponse.ok("更新成功", null);
     }
@@ -343,6 +356,18 @@ public class MerchantAdminController {
     }
 
     // ==================== 内部方法 ====================
+
+    private String normalizeRequiredText(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private String normalizeOptionalText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
 
     private void applyRequest(DishesEntity dish, AddDishRequest request) {
         dish.setTypeId(request.getTypeId());

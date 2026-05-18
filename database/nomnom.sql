@@ -87,7 +87,7 @@ create table dishes_type
     id       int auto_increment comment '主键ID，自增'
         primary key,
     icon_uri varchar(255) null comment '图标URL路径',
-    name     varchar(30)  null comment '菜品种类'
+    name     varchar(30)  not null comment '菜品种类'
 )
     comment '菜品种类信息表' charset = utf8mb4;
 

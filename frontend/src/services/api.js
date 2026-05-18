@@ -98,9 +98,8 @@ export function createOrder(payload) {
   })
 }
 
-
 // ==========================================
-// 2. Axios 商家端请求封装
+// 2. Axios 商家端请求封装 (完整版)
 // ==========================================
 const axiosRequest = axios.create({ baseURL: '/api' })
 
@@ -113,7 +112,12 @@ axiosRequest.interceptors.request.use((config) => {
 })
 
 axiosRequest.interceptors.response.use(
-    (response) => response,
+    (response) => {
+      if (response.data?.success === false) {
+        return Promise.reject(new Error(response.data.message || '请求失败'))
+      }
+      return response
+    },
     (error) => {
       if (error.response?.status === 401) {
         clearAuthAndRedirect()
@@ -127,12 +131,11 @@ export const merchantApi = {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
 
+  // --- B01 菜品与分类 ---
   getDishes: () => axiosRequest.get('/admin/dishes'),
   addDish: (data) => axiosRequest.post('/admin/dishes/add', data),
   updateDish: (id, data) => axiosRequest.put(`/admin/dishes/${id}`, data),
-  updateDishStatus: (id, status) => axiosRequest.put(`/admin/dishes/${id}/status`, null, {
-    params: { status }
-  }),
+  updateDishStatus: (id, status) => axiosRequest.put(`/admin/dishes/${id}/status`, null, { params: { status } }),
   deleteDish: (id) => axiosRequest.delete(`/admin/dishes/${id}`),
 
   getCategories: (keyword) => axiosRequest.get('/admin/categories', { params: keyword ? { keyword } : {} }),
@@ -140,16 +143,24 @@ export const merchantApi = {
   updateCategory: (id, data) => axiosRequest.put(`/admin/categories/${id}`, data),
   deleteCategory: (id) => axiosRequest.delete(`/admin/categories/${id}`),
 
+  // --- B02 订单与桌台 ---
   getOrders: (status) => axiosRequest.get('/admin/orders', { params: status != null ? { status } : {} }),
-  updateOrderStatus: (id, status) => axiosRequest.put(`/admin/orders/${id}/status`, null, {
-    params: { status }
-  }),
+  updateOrderStatus: (id, status) => axiosRequest.put(`/admin/orders/${id}/status`, null, { params: { status } }),
 
   getTables: () => axiosRequest.get('/admin/tables'),
   addTable: (data) => axiosRequest.post('/admin/tables', data),
   updateTable: (id, data) => axiosRequest.put(`/admin/tables/${id}`, data),
   deleteTable: (id) => axiosRequest.delete(`/admin/tables/${id}`),
-  updateTableStatus: (tableId, status) => axiosRequest.put('/admin/tables/status', null, {
-    params: { tableId, status }
-  })
+  updateTableStatus: (tableId, status) => axiosRequest.put('/admin/tables/status', null, { params: { tableId, status } }),
+
+  // --- B03 & B04 审核、对账与评价分析 ---
+  getAudits: () => axiosRequest.get('/admin/audits'),
+  auditRegistrationOrRefund: (id, approved) => axiosRequest.put(`/admin/audit/${id}`, null, { params: { approved } }),
+  getFinanceReconciliation: () => axiosRequest.get('/admin/finance/reconciliation'),
+
+  getReviews: () => axiosRequest.get('/admin/reviews'),
+  replyToReview: (id, replyContent) => axiosRequest.post(`/admin/reviews/${id}/reply`, { reply: replyContent }),
+  deleteReview: (id) => axiosRequest.delete(`/admin/reviews/${id}`),
+
+  getStats: () => axiosRequest.get('/admin/stats')
 }
