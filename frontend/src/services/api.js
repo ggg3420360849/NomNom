@@ -144,10 +144,12 @@ export const merchantApi = {
   deleteCategory: (id) => axiosRequest.delete(`/admin/categories/${id}`),
 
   // --- B02 订单与桌台 ---
+  submitOrder: (data) => axiosRequest.post('/customer/orders', data),
   getOrders: (status) => axiosRequest.get('/admin/orders', { params: status != null ? { status } : {} }),
   updateOrderStatus: (id, status) => axiosRequest.put(`/admin/orders/${id}/status`, null, { params: { status } }),
 
   getTables: () => axiosRequest.get('/admin/tables'),
+  getCustomerTables: () => axiosRequest.get('customer/tables'),
   addTable: (data) => axiosRequest.post('/admin/tables', data),
   updateTable: (id, data) => axiosRequest.put(`/admin/tables/${id}`, data),
   deleteTable: (id) => axiosRequest.delete(`/admin/tables/${id}`),
@@ -157,6 +159,7 @@ export const merchantApi = {
   getAudits: () => axiosRequest.get('/admin/audits'),
   auditRegistrationOrRefund: (id, approved) => axiosRequest.put(`/admin/audit/${id}`, null, { params: { approved } }),
   getFinanceReconciliation: () => axiosRequest.get('/admin/finance/reconciliation'),
+  submitComment: (data) => axiosRequest.post('/customer/comment', data),
 
   getReviews: () => axiosRequest.get('/admin/reviews'),
   replyToReview: (id, replyContent) => axiosRequest.post(`/admin/reviews/${id}/reply`, { reply: replyContent }),

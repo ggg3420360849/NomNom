@@ -1,4 +1,5 @@
 <script setup>
+import { merchantApi } from '../services/api'
 import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import PortalHeader from '../components/PortalHeader.vue'
@@ -13,6 +14,42 @@ const http = axios.create({
   baseURL: '/api',
   timeout: 10000
 })
+
+// ========== 桌台选择功能 ==========
+const showTableDialog = ref(false)
+const tableList = ref([])
+const currentTable = ref(null)
+
+// 加载桌台
+async function loadTableList() {
+  try {
+    const res = await merchantApi.getCustomerTables()
+    const rawData = res.data?.data || res.data || []
+
+    tableList.value = rawData.map(item => ({
+      id: item.id,
+      number: item.number,
+      status: item.status || 0,
+      seats: item.personNumber || 2,
+      area: item.area || '大厅'
+    }))
+  } catch (err) {
+    console.error('加载桌台失败', err)
+    tableList.value = []
+  }
+  showTableDialog.value = true
+}
+
+// 选择桌台
+function selectTable(table) {
+  if (table.status === 1) {
+    alert('该桌台已被占用！')
+    return
+  }
+  currentTable.value = table
+  showTableDialog.value = false
+}
+// =================================
 
 // 充值功能
 const wallet = ref(0)
@@ -56,11 +93,10 @@ function closeDetailModal() {
 const orderReceiptVisible = ref(false)
 const orderInfo = ref({})
 
-// 分类（用 ID）
+// 分类
 const categoryList = ref([])
-const activeCategory = ref(null) // 这里存分类 ID
+const activeCategory = ref(null)
 
-// 获取分类
 async function loadCategory() {
   try {
     const res = await http.get('/menu/categories')
@@ -70,14 +106,12 @@ async function loadCategory() {
   }
 }
 
-// 加载菜品（按 typeId 查询）
 const localMenuItems = ref([])
-
 async function loadMenu() {
   try {
     const params = {}
     if (activeCategory.value != null) {
-      params.category = activeCategory.value // 传分类 ID
+      params.category = activeCategory.value
     }
     const res = await http.get('/menu/items', { params })
     localMenuItems.value = res.data.data || []
@@ -99,7 +133,6 @@ const filteredMenuItems = computed(() => {
   })
 })
 
-// 切换分类（传 ID）
 function changeCategory(catId) {
   activeCategory.value = catId
   loadMenu()
@@ -107,7 +140,10 @@ function changeCategory(catId) {
 
 // 购物车
 const cart = ref([])
-const cartCount = computed(() => cart.value.reduce((s, i) => s + i.quantity, 0))
+
+const cartCount = computed(() => {
+  return cart.value.reduce((s, i) => s + i.quantity, 0)
+})
 const cartTotal = computed(() => {
   const total = cart.value.reduce((s, i) => s + i.price * i.quantity, 0)
   return Number(total.toFixed(2))
@@ -115,31 +151,79 @@ const cartTotal = computed(() => {
 
 function addToCart(item) {
   const found = cart.value.find(i => i.id === item.id)
-  if (found) found.quantity++
-  else cart.value.push({ ...item, quantity: 1 })
+  if (found) {
+    found.quantity++
+  } else {
+    cart.value.push({ ...item, quantity: 1 })
+  }
+  cart.value = [...cart.value]
 }
+
 function updateQuantity(id, num) {
   const it = cart.value.find(i => i.id === id)
   if (!it) return
   it.quantity += num
-  if (it.quantity <= 0) cart.value = cart.value.filter(i => i.id !== id)
+  if (it.quantity <= 0) {
+    cart.value = cart.value.filter(i => i.id !== id)
+  }
+  cart.value = [...cart.value]
 }
 
 // 提交订单
-function handleSubmit() {
-  if (cartCount.value === 0) return alert('购物车是空的！')
-  if (wallet.value < cartTotal.value) return alert('余额不足，请先充值')
-
-  orderInfo.value = {
-    time: new Date().toLocaleString(),
-    items: [...cart.value],
-    total: cartTotal.value,
-    balance: Number((wallet.value - cartTotal.value).toFixed(2))
+async function handleSubmit() {
+  // 校验：必须选桌台
+  if (!currentTable.value) {
+    alert('请先选择桌台')
+    return
   }
 
-  wallet.value = orderInfo.balance
-  orderReceiptVisible.value = true
-  cart.value = []
+  // 校验：购物车不能为空
+  if (cart.value.length === 0) {
+    alert('请先选择菜品')
+    return
+  }
+
+  // 构造提交数据（包含购物车明细）
+  const orderData = {
+    tableId: currentTable.value.id,
+    totalPrice: cartTotal.value,
+    items: cart.value.map(item => ({
+      packageId: item.id,      // 菜品的 id 就是套餐ID
+      name: item.name,
+      price: item.price,
+      quantity: item.quantity,
+      coverUrl: item.coverUrl
+    }))
+  }
+
+  console.log('下单请求数据:', orderData)
+
+  try {
+    // 调用下单接口
+    const res = await merchantApi.submitOrder(orderData)
+    const orderId = res.data.data
+    currentOrderId.value = orderId
+
+    // 下单成功 → 更新本地数据
+    orderInfo.value = {
+      time: new Date().toLocaleString(),
+      tableName: currentTable.value.number,
+      items: [...cart.value],
+      total: cartTotal.value,
+      balance: wallet.value - cartTotal.value,
+      orderId: orderId
+    }
+
+    wallet.value = orderInfo.value.balance
+    orderReceiptVisible.value = true
+    cart.value = []
+
+    alert('下单成功！商家已收到订单')
+
+  } catch (err) {
+    console.error('下单失败：', err)
+    alert('下单失败，请稍后重试')
+  }
 }
 
 async function exitPortal() {
@@ -147,12 +231,112 @@ async function exitPortal() {
   await router.push('/login')
 }
 
-// 初始化
 onMounted(() => {
   app.loadPortalData()
   loadCategory()
   loadMenu()
+  loadTableList()
 })
+
+// ==============================================
+// 订单评价功能（对每个菜品分别评价）
+// ==============================================
+const showCommentModal = ref(false)
+const currentOrderId = ref(null)
+const orderPackages = ref([])      // 订单中的套餐/菜品列表
+const submitting = ref(false)
+
+// 打开评价弹窗（支付成功后调用）
+async function openCommentModal(orderId) {
+  currentOrderId.value = orderId
+  showCommentModal.value = true
+  submitting.value = false
+
+  try {
+    // 获取订单中的菜品列表
+    const response = await http.get(`/customer/orders/${orderId}/packages`)
+    if (response.data.code === 200 || response.data.success) {
+      const packages = response.data.data || response.data
+      // 为每个菜品添加评分和评价内容字段
+      orderPackages.value = packages.map(pkg => ({
+        ...pkg,
+        ratingValue: 0,      // 初始化评分
+        commentContent: ''   // 初始化评价内容
+      }))
+      console.log('获取到菜品列表:', orderPackages.value)
+    } else {
+      alert('获取菜品列表失败：' + (response.data.message || '未知错误'))
+      closeCommentModal()
+    }
+  } catch (error) {
+    console.error('获取订单菜品失败:', error)
+    alert('获取菜品列表失败，请稍后重试')
+    closeCommentModal()
+  }
+}
+
+// 设置评分
+function setRating(pkg, value) {
+  pkg.ratingValue = value
+}
+
+// 提交所有评价
+async function submitAllComments() {
+  // 检查是否所有菜品都已评分
+  const unratedPackages = orderPackages.value.filter(pkg => pkg.ratingValue === 0)
+  if (unratedPackages.length > 0) {
+    alert(`请为所有菜品评分（还有 ${unratedPackages.length} 个未评分）`)
+    return
+  }
+
+  submitting.value = true
+
+  console.log('=== 提交评价 ===')
+  console.log('currentOrderId:', currentOrderId.value)
+
+  const requests = orderPackages.value.map(pkg => ({
+    ordersId: currentOrderId.value,
+    dishesId: pkg.packageId,
+    ratingValue: pkg.ratingValue,
+    content: pkg.commentContent || ''
+  }))
+
+  console.log('批量评价请求:', JSON.stringify(requests, null, 2))
+
+  try {
+    const response = await axios.post('/api/customer/comments/batch', requests)
+    if (response.data.code === 200 || response.data.success) {
+      alert('✅ 评价成功！感谢您的反馈！')
+      closeCommentModal()
+    } else {
+      alert('❌ 评价失败：' + (response.data.message || '未知错误'))
+    }
+  } catch (error) {
+    console.error('批量评价失败:', error)
+    alert('❌ 评价失败，请重试\n' + (error.response?.data?.message || error.message))
+  } finally {
+    submitting.value = false
+  }
+}
+
+// 关闭评价弹窗
+function closeCommentModal() {
+  showCommentModal.value = false
+  orderPackages.value = []
+  currentOrderId.value = null
+  submitting.value = false
+}
+
+// 订单完成：关闭支付弹窗 + 打开评价弹窗
+function handleOrderComplete() {
+  // 1. 关闭订单支付成功弹窗
+  orderReceiptVisible.value = false
+
+  // 2. 如果有订单ID，打开评价弹窗
+  if (currentOrderId.value) {
+    openCommentModal(currentOrderId.value)
+  }
+}
 </script>
 
 <template>
@@ -160,18 +344,52 @@ onMounted(() => {
     <PortalHeader
         title="顾客端点餐台"
         :display-name="app.displayName.value"
-        :role-label="app.currentUser.value.roleLabel"
+        :role-label="app.currentUser.value?.roleLabel || 'guest'"
         :loading="app.pageLoading.value"
         @logout="exitPortal"
     />
 
+    <!-- 桌台选择弹窗 -->
+    <div v-if="showTableDialog" class="modal-overlay">
+      <div class="modal table-modal">
+        <h3 style="text-align:center; margin:0 0 12px">选择桌台</h3>
+
+        <div class="table-grid" v-if="tableList.length > 0">
+          <div
+              v-for="table in tableList"
+              :key="table.id"
+              class="table-item"
+              :class="{ occupied: table.status === 1 }"
+              @click="selectTable(table)"
+          >
+            {{ table.number }}
+            <span v-if="table.status === 0" style="color:green">空闲</span>
+            <span v-else style="color:red">占用</span>
+          </div>
+        </div>
+
+        <div style="text-align:center; padding:20px; color:#666" v-else>
+          暂无桌台
+        </div>
+
+        <button
+            style="width:100%; margin-top:12px; padding:10px; background:#ff4444; color:#fff; border:none; border-radius:6px; cursor:pointer"
+            @click="exitPortal()"
+        >
+          退出登录
+        </button>
+      </div>
+    </div>
+
     <div class="wallet-bar">
       <span>余额：¥{{ wallet.toFixed(2) }}</span>
+      <span v-if="currentTable" style="color:#1890ff; font-weight:bold">
+        当前：{{ currentTable.number }}
+      </span>
       <button class="recharge-btn" @click="openRechargeDialog">充值</button>
     </div>
 
     <div class="main-layout">
-      <!-- 左侧分类栏 -->
       <aside class="category-sidebar">
         <button
             class="category-btn"
@@ -191,7 +409,6 @@ onMounted(() => {
         </button>
       </aside>
 
-      <!-- 菜单 -->
       <section class="menu-area">
         <div class="search-box">
           <input
@@ -218,7 +435,6 @@ onMounted(() => {
       </section>
     </div>
 
-    <!-- 底部购物车 -->
     <footer class="cart-footer">
       <div class="cart-summary">
         <div class="cart-info">
@@ -227,7 +443,7 @@ onMounted(() => {
         </div>
         <button
             class="submit-btn"
-            :disabled="cartCount === 0 || wallet < cartTotal"
+            :disabled="cart.length === 0 || wallet < cartTotal"
             @click="handleSubmit"
         >
           提交订单
@@ -251,12 +467,12 @@ onMounted(() => {
     </footer>
 
     <!-- 充值弹窗 -->
-    <div v-if="rechargeVisible" class="modal-overlay" @click.self="rechargeVisible = false">
+    <div v-if="rechargeVisible" class="modal-overlay" @click.self="rechargeVisible.value = false">
       <div class="modal">
         <h3>模拟充值</h3>
         <input v-model.number="rechargeAmount" type="number" placeholder="输入金额" />
         <div class="modal-buttons">
-          <button @click="rechargeVisible = false">取消</button>
+          <button @click="rechargeVisible.value = false">取消</button>
           <button class="primary-button" @click="doRecharge">确认</button>
         </div>
       </div>
@@ -294,6 +510,9 @@ onMounted(() => {
         <div class="receipt-header">
           <h3>订单支付成功</h3>
           <p>{{ orderInfo.time }}</p>
+          <p style="margin:2px 0 0; font-size:12px">
+            桌台：{{ orderInfo.tableName }}
+          </p>
         </div>
         <div class="receipt-body">
           <div class="receipt-item" v-for="(item, idx) in orderInfo.items" :key="idx">
@@ -311,14 +530,71 @@ onMounted(() => {
           <span>剩余余额</span>
           <span>¥{{ orderInfo.balance }}</span>
         </div>
-        <button class="close-btn" @click="orderReceiptVisible = false">完成</button>
+        <button class="close-btn" @click="handleOrderComplete">完成</button>
+      </div>
+    </div>
+
+    <!-- 订单评价弹窗（对每个菜品分别评价） -->
+    <div v-if="showCommentModal" class="modal-overlay" @click.self="closeCommentModal">
+      <div class="comment-modal">
+        <div class="modal-header">
+          <h3>评价菜品</h3>
+          <button class="close-btn" @click="closeCommentModal">×</button>
+        </div>
+
+        <div class="modal-body">
+          <div v-for="(pkg, index) in orderPackages" :key="pkg.packageId" class="dish-comment-item">
+            <div class="dish-info">
+              <img v-if="pkg.coverUrl" :src="pkg.coverUrl" class="dish-cover" />
+              <div class="dish-details">
+                <span class="dish-name">{{ pkg.dishName || pkg.packageName }}</span>
+                <span class="dish-quantity">x{{ pkg.buyNumber }}</span>
+                <span class="dish-price">¥{{ pkg.price }}</span>
+              </div>
+            </div>
+
+            <div class="rating-section">
+              <span class="rating-label">评分：</span>
+              <div class="stars">
+                <span
+                    v-for="s in 5"
+                    :key="s"
+                    class="star"
+                    :class="{ active: pkg.ratingValue >= s }"
+                    @click="setRating(pkg, s)"
+                >★</span>
+              </div>
+            </div>
+
+            <div class="comment-section">
+              <textarea
+                  v-model="pkg.commentContent"
+                  placeholder="说说这道菜的味道如何..."
+                  rows="2"
+                  class="comment-input"
+              ></textarea>
+            </div>
+
+            <hr v-if="index < orderPackages.length - 1" class="divider" />
+          </div>
+
+          <div v-if="orderPackages.length === 0" class="no-dishes">
+            加载中...
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="cancel-btn" @click="closeCommentModal">取消</button>
+          <button class="submit-btn" @click="submitAllComments" :disabled="submitting">
+            {{ submitting ? '提交中...' : '提交评价' }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* 样式完全不变，保持你原来的样式 */
 .portal-shell {
   display: flex;
   flex-direction: column;
@@ -332,6 +608,7 @@ onMounted(() => {
   background: #fff;
   border-bottom: 1px solid #eee;
   font-weight: bold;
+  gap:15px;
 }
 .recharge-btn {
   background: #4CAF50;
@@ -677,5 +954,209 @@ onMounted(() => {
   padding: 10px;
   border-radius: 8px;
   cursor: pointer;
+}
+.table-modal {
+  width: 360px;
+  padding: 20px;
+}
+.table-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  margin: 10px 0;
+}
+.table-item {
+  width: 80px;
+  padding: 12px 0;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  text-align: center;
+  cursor: pointer;
+  font-size: 14px;
+}
+.table-item.occupied {
+  background: #f5f5f5;
+  color: #999;
+  cursor: not-allowed;
+  border-color: #eee;
+}
+
+/* ========== 评价弹窗专用样式 ========== */
+.comment-modal {
+  background: white;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 16px 16px 20px;
+  border-bottom: 1px solid #eee;
+  flex-wrap: nowrap;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.modal-header .close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #999;
+  margin-left: 8px;
+  padding-left: 20px;
+  width: 24px;
+}
+
+.modal-header .close-btn:hover {
+  color: #333;
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.dish-comment-item {
+  margin-bottom: 20px;
+}
+
+.dish-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.dish-cover {
+  width: 50px;
+  height: 50px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.dish-details {
+  flex: 1;
+}
+
+.dish-name {
+  font-weight: 500;
+  font-size: 16px;
+}
+
+.dish-quantity {
+  color: #666;
+  font-size: 14px;
+  margin-left: 8px;
+}
+
+.dish-price {
+  color: #ff6b35;
+  font-size: 14px;
+  margin-left: 8px;
+}
+
+.rating-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.rating-label {
+  font-size: 14px;
+  color: #666;
+}
+
+.stars {
+  display: flex;
+  gap: 4px;
+}
+
+.star {
+  font-size: 24px;
+  color: #ddd;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.star.active {
+  color: #ffc107;
+}
+
+.star:hover {
+  color: #ffc107;
+}
+
+.comment-section {
+  margin-bottom: 12px;
+}
+
+.comment-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.comment-input:focus {
+  outline: none;
+  border-color: #ff6b35;
+}
+
+.divider {
+  margin: 16px 0;
+  border: none;
+  border-top: 1px solid #eee;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 20px;
+  border-top: 1px solid #eee;
+}
+
+.cancel-btn {
+  padding: 8px 20px;
+  border: 1px solid #ddd;
+  background: white;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.submit-btn {
+  padding: 8px 20px;
+  background: #ff6b35;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.submit-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.no-dishes {
+  text-align: center;
+  color: #999;
+  padding: 30px;
 }
 </style>

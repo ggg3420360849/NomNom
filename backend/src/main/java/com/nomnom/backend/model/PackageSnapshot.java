@@ -12,6 +12,13 @@ public class PackageSnapshot {
     private BigDecimal price;
     private Integer dishStatus;
 
+    // ========== 新增字段（用于评价功能）==========
+    private Integer buyNumber;     // 购买数量
+    private Integer ratingValue;   // 评分（1-5，前端绑定用）
+    private String commentContent; // 评价内容（前端绑定用）
+    // =========================================
+
+    // 原有的 getter/setter
     public Long getPackageId() {
         return packageId;
     }
@@ -67,6 +74,32 @@ public class PackageSnapshot {
     public void setDishStatus(Integer dishStatus) {
         this.dishStatus = dishStatus;
     }
+
+    // ========== 新增的 getter/setter ==========
+    public Integer getBuyNumber() {
+        return buyNumber;
+    }
+
+    public void setBuyNumber(Integer buyNumber) {
+        this.buyNumber = buyNumber;
+    }
+
+    public Integer getRatingValue() {
+        return ratingValue;
+    }
+
+    public void setRatingValue(Integer ratingValue) {
+        this.ratingValue = ratingValue;
+    }
+
+    public String getCommentContent() {
+        return commentContent;
+    }
+
+    public void setCommentContent(String commentContent) {
+        this.commentContent = commentContent;
+    }
+    // =========================================
 
     public String resolveDisplayName() {
         StringBuilder builder = new StringBuilder();
