@@ -6,6 +6,7 @@ import java.util.List;
 public class EvaluationResponse {
     private Long id;
     private Long dishesId;
+    private Long ordersId;
     private Long userId;
     private String userName;
     private String userAvatar;
@@ -22,6 +23,9 @@ public class EvaluationResponse {
 
     public Long getDishesId() { return dishesId; }
     public void setDishesId(Long dishesId) { this.dishesId = dishesId; }
+
+    public Long getOrdersId() { return ordersId; }
+    public void setOrdersId(Long ordersId) { this.ordersId = ordersId; }
 
     public Long getUserId() { return userId; }
     public void setUserId(Long userId) { this.userId = userId; }

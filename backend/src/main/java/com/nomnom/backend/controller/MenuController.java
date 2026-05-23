@@ -5,6 +5,7 @@ import com.nomnom.backend.model.MenuCategory;
 import com.nomnom.backend.model.MenuItem;
 import com.nomnom.backend.service.MenuService;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -32,5 +33,10 @@ public class MenuController {
             @RequestParam(required = false) String keyword
     ) {
         return ApiResponse.ok(menuService.getMenuItems(category, keyword));
+    }
+
+    @GetMapping("/recommend/{packageId}")
+    public ApiResponse<List<MenuItem>> getRecommendItems(@PathVariable Long packageId) {
+        return ApiResponse.ok(menuService.getRecommendItems(packageId));
     }
 }

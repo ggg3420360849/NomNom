@@ -14,12 +14,14 @@ public interface PackageReadMapper {
             <script>
             SELECT
                 dp.id AS packageId,
+                d.id AS dishesId,
                 d.name AS dishName,
                 COALESCE(dp.name, '') AS packageName,
                 COALESCE(dp.specs, '') AS specs,
                 COALESCE(d.cover_url, '') AS coverUrl,
                 COALESCE(dp.price, 0) AS price,
-                COALESCE(d.status, 0) AS dishStatus
+                COALESCE(d.status, 0) AS dishStatus,
+                COALESCE(d.stock, 999) AS stock
             FROM dishes_package dp
             JOIN dishes d ON d.id = dp.dishes_id
             WHERE dp.id IN

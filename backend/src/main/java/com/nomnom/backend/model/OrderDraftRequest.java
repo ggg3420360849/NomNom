@@ -6,6 +6,8 @@ import java.util.List;
 public class OrderDraftRequest {
 
     private Long userId;
+    private Long tableId;
+    private String tableNumber;
     private String customerName;
     private String remark;
     private List<OrderItemRequest> items = new ArrayList<>();
@@ -16,6 +18,22 @@ public class OrderDraftRequest {
 
     public void setUserId(Long userId) {
         this.userId = userId;
+    }
+
+    public Long getTableId() {
+        return tableId;
+    }
+
+    public void setTableId(Long tableId) {
+        this.tableId = tableId;
+    }
+
+    public String getTableNumber() {
+        return tableNumber;
+    }
+
+    public void setTableNumber(String tableNumber) {
+        this.tableNumber = tableNumber;
     }
 
     public String getCustomerName() {

@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import javax.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.Map;
 
@@ -25,17 +26,23 @@ public class OrderController {
     }
 
     @GetMapping("/current")
-    public ApiResponse<List<OrderSummary>> getCurrentOrders(@RequestParam(required = false) Long userId) {
-        return ApiResponse.ok(orderService.getCurrentOrders(userId));
+    public ApiResponse<List<OrderSummary>> getCurrentOrders(@RequestParam(required = false) Long userId,
+                                                            HttpServletRequest request) {
+        String roleCode = (String) request.getAttribute("roleCode");
+        Long currentUserId = (Long) request.getAttribute("userId");
+        Long effectiveUserId = "MERCHANT".equals(roleCode) ? userId : currentUserId;
+        return ApiResponse.ok(orderService.getCurrentOrders(effectiveUserId));
     }
 
     @PostMapping("/preview")
-    public ApiResponse<Map<String, Object>> preview(@RequestBody OrderDraftRequest request) {
+    public ApiResponse<Map<String, Object>> preview(@RequestBody OrderDraftRequest request, HttpServletRequest httpRequest) {
+        request.setUserId((Long) httpRequest.getAttribute("userId"));
         return ApiResponse.ok(orderService.preview(request));
     }
 
     @PostMapping
-    public ApiResponse<OrderSummary> create(@RequestBody OrderDraftRequest request) {
+    public ApiResponse<OrderSummary> create(@RequestBody OrderDraftRequest request, HttpServletRequest httpRequest) {
+        request.setUserId((Long) httpRequest.getAttribute("userId"));
         return ApiResponse.ok("order created", orderService.createDraftOrder(request));
     }
 }

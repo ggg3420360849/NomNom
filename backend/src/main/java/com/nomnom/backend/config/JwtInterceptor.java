@@ -36,7 +36,7 @@ public class JwtInterceptor implements HandlerInterceptor {
         }
 
         String path = request.getRequestURI();
-        if (path.startsWith("/api/admin/") || path.startsWith("/api/common/")) {
+        if (path.startsWith("/api/admin/")) {
             String roleCode = jwtUtils.getRoleCode(token);
             if (!"MERCHANT".equals(roleCode)) {
                 writeJson(response, HttpStatus.FORBIDDEN.value(), "当前账号无权访问商家端");

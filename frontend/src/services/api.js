@@ -98,6 +98,10 @@ export function createOrder(payload) {
   })
 }
 
+export function fetchAvailableTables() {
+  return request('/api/tables/available')
+}
+
 // ==========================================
 // 2. Axios 商家端请求封装 (完整版)
 // ==========================================
@@ -163,4 +167,18 @@ export const merchantApi = {
   deleteReview: (id) => axiosRequest.delete(`/admin/reviews/${id}`),
 
   getStats: () => axiosRequest.get('/admin/stats')
+}
+
+export const customerApi = {
+  getWallet: () => axiosRequest.get('/wallet'),
+  rechargeWallet: (amount) => axiosRequest.post('/wallet/recharge', { amount }),
+  getOrders: () => axiosRequest.get('/orders/current'),
+  createOrder: (data) => axiosRequest.post('/orders', data),
+  getCollections: () => axiosRequest.get('/collection'),
+  toggleCollection: (dishesId) => axiosRequest.post('/collection/toggle', null, { params: { dishesId } }),
+  getMyEvaluations: () => axiosRequest.get('/evaluations/my'),
+  createEvaluation: (data) => axiosRequest.post('/evaluations', data),
+  uploadFile: (formData) => axiosRequest.post('/common/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
 }

@@ -15,6 +15,7 @@ public interface EvaluationReadMapper {
             SELECT
                 e.id AS id,
                 e.dishes_id AS dishesId,
+                e.orders_id AS ordersId,
                 e.user_id AS userId,
                 u.username AS userName,
                 u.avatar AS userAvatar,
@@ -37,6 +38,7 @@ public interface EvaluationReadMapper {
             SELECT
                 e.id AS id,
                 e.dishes_id AS dishesId,
+                e.orders_id AS ordersId,
                 e.user_id AS userId,
                 u.username AS userName,
                 u.avatar AS userAvatar,

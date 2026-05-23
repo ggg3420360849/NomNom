@@ -29,6 +29,10 @@ function showToast(msg) {
   toastTimer = setTimeout(() => { toast.value = '' }, 3000)
 }
 
+function getErrorMessage(err, fallback = '操作失败') {
+  return err?.response?.data?.message || err?.message || fallback
+}
+
 const TABLE_STATUS = {
   0: { label: '空闲', class: 'status-idle', color: '#689f38' },
   1: { label: '已入座', class: 'status-seated', color: '#f57c00' },
@@ -150,7 +154,7 @@ async function quickAddCategory(presetName) {
     showToast(`分类「${presetName}」已写入数据库！`);
     await fetchCategories();
   } catch (err) {
-    showToast('快捷添加失败，请检查网络');
+    showToast('快捷添加失败');
   }
 }
 
@@ -164,20 +168,30 @@ async function removeDish(dish) { try { await merchantApi.deleteDish(dish.id); a
 const handleImageUpload = async (event) => {
   const file = event.target.files[0]; if (!file) return;
   const formData = new FormData(); formData.append('file', file);
-  try { const res = await merchantApi.uploadFile(formData); dishForm.cover_url = res.data.data || res.data; } catch {}
+  try {
+    const res = await merchantApi.uploadFile(formData)
+    dishForm.cover_url = res.data.data || res.data
+  } catch (err) {
+    showToast(getErrorMessage(err, '图片上传失败'))
+  }
 };
 
 const saveDish = async () => {
+  if (!dishForm.name.trim()) return showToast('菜品名称不能为空')
+
   try {
     // ★ 核心修复点 2：在保存给后端前，把数组转换成字符串 ★
     const payload = { ...dishForm }
+    payload.price = Number(dishForm.price || 0)
+    payload.memberPrice = Number(dishForm.memberPrice || 0)
+    payload.stock = Number(dishForm.stock || 0)
     payload.recommendIds = JSON.stringify(dishForm.recommend_ids)
 
     if (editingId.value) await merchantApi.updateDish(editingId.value, payload)
     else await merchantApi.addDish(payload)
 
     showToast('菜品保存成功'); showDishModal.value = false; resetDishForm(); await fetchDishes()
-  } catch { showToast('保存失败') }
+  } catch (err) { showToast(getErrorMessage(err, '保存失败')) }
 };
 
 const handleTableClick = async (table) => {
@@ -186,7 +200,7 @@ const handleTableClick = async (table) => {
 };
 
 const orderList = ref([]); const auditList = ref([]); const reconciliationList = ref([]); const reviewList = ref([]); const statsList = ref([]);
-const orderStatusFilter = ref(null); const ORDER_STATUS = { 1: '待支付', 2: '已支付', 3: '制作中', 4: '已完成' };
+const orderStatusFilter = ref(null); const ORDER_STATUS = { 1: '待支付', 2: '已支付', 3: '制作中', 4: '已完成', 5: '已取消' };
 
 async function fetchOrders() { try { const res = await merchantApi.getOrders(orderStatusFilter.value); orderList.value = res.data?.data || res.data || [] } catch { } }
 async function fetchAudits() { try { const res = await merchantApi.getAudits(); auditList.value = res.data?.data || [] } catch { } }
@@ -227,7 +241,6 @@ onMounted(() => {
         <div class="logo-box">NN</div>
         <div class="brand-text">
           <h1>NomNom 智慧餐厅</h1>
-          <span>商家管理后台 V2.0</span>
         </div>
       </div>
 
@@ -289,7 +302,7 @@ onMounted(() => {
           <div v-if="subTab === 'category'" style="margin-top:20px">
 
             <div class="preset-category-panel" v-if="availablePresets.length > 0">
-              <p class="preset-title">💡 建议快捷补全以下缺失分类：</p>
+              <p class="preset-title">快捷分类</p>
               <div class="preset-tags">
                 <span
                     v-for="preset in availablePresets"
@@ -303,7 +316,7 @@ onMounted(() => {
             </div>
 
             <div style="display:flex;gap:12px;margin-bottom:24px;align-items:center">
-              <input v-model="categoryForm.name" placeholder="手动输入其他分类名称..." style="padding:8px 12px;border:1px solid #e0d4c3;border-radius:6px;width:200px" />
+              <input v-model="categoryForm.name" placeholder="分类名称" style="padding:8px 12px;border:1px solid #e0d4c3;border-radius:6px;width:200px" />
               <button class="btn-primary" @click="saveCategory" style="padding:8px 20px">{{ editingCategoryId ? '保存修改' : '确认新增分类' }}</button>
               <button v-if="editingCategoryId" class="btn-cancel" @click="editingCategoryId=null; categoryForm.name=''">放弃编辑</button>
             </div>
@@ -343,12 +356,12 @@ onMounted(() => {
                     </tr>
                     </tbody>
                   </table>
-                  <div v-else class="empty-hint">此分类下空空如也，快去【菜品库管理】给它添加商品吧~</div>
+                  <div v-else class="empty-hint">无菜品</div>
                 </div>
               </div>
 
               <div v-if="categoryList.length === 0" class="empty-hint" style="padding: 40px;">
-                当前数据库中没有任何分类数据，请点击上方预设词条一键导入！
+                无分类
               </div>
             </div>
           </div>
@@ -389,10 +402,10 @@ onMounted(() => {
           </div>
           <div v-if="b03SubTab === 'orders'">
             <table class="biz-table">
-              <thead><tr><th>订单编号</th><th>金额</th><th>状态</th><th>订单时间</th><th>操作</th></tr></thead>
+              <thead><tr><th>订单编号</th><th>桌台</th><th>金额</th><th>状态</th><th>订单时间</th><th>操作</th></tr></thead>
               <tbody>
-              <tr v-if="orderList.length===0"><td colspan="5" style="text-align:center; color:#999;">暂无订单记录</td></tr>
-              <tr v-for="o in orderList" :key="o.id"><td>{{ o.code }}</td><td>￥{{ Number(o.totalPrice||0).toFixed(2) }}</td><td>{{ ORDER_STATUS[o.status]||o.status }}</td><td>{{ o.createTime }}</td>
+              <tr v-if="orderList.length===0"><td colspan="6" style="text-align:center; color:#999;">暂无订单</td></tr>
+              <tr v-for="o in orderList" :key="o.id"><td>{{ o.code }}</td><td>{{ o.tableNumber || '-' }}</td><td>￥{{ Number(o.totalPrice||0).toFixed(2) }}</td><td>{{ ORDER_STATUS[o.status]||o.status }}</td><td>{{ o.createTime }}</td>
                 <td>
                   <select @change="changeOrderStatus(o,Number($event.target.value))" style="padding:4px 8px;border-radius:4px">
                     <option value="">更新推进</option><option v-for="(label,val) in ORDER_STATUS" :key="val" :value="val" :disabled="val===o.status">{{ label }}</option>
@@ -406,7 +419,7 @@ onMounted(() => {
             <table class="biz-table">
               <thead><tr><th>事项编号</th><th>类别</th><th>申请详情</th><th>当前进度</th><th>裁决</th></tr></thead>
               <tbody>
-              <tr v-if="auditList.length===0"><td colspan="5" style="text-align:center; color:#999;">暂无审核申请</td></tr>
+              <tr v-if="auditList.length===0"><td colspan="5" style="text-align:center; color:#999;">暂无审核</td></tr>
               <tr v-for="audit in auditList" :key="audit.id"><td>#{{ audit.id }}</td><td>{{ audit.type==='CHARGE'?'钱包充值':'订单退款' }}</td><td>{{ audit.desc }}</td><td>{{ audit.status }}</td>
                 <td>
                   <div v-if="audit.status==='PENDING'" style="display:flex; gap:6px;">
@@ -422,7 +435,7 @@ onMounted(() => {
             <table class="biz-table">
               <thead><tr><th>审计凭证号</th><th>应用端消费</th><th>底层流水</th><th>结果</th></tr></thead>
               <tbody>
-              <tr v-if="reconciliationList.length===0"><td colspan="4" style="text-align:center; color:#999;">暂无对账记录</td></tr>
+              <tr v-if="reconciliationList.length===0"><td colspan="4" style="text-align:center; color:#999;">暂无对账</td></tr>
               <tr v-for="rec in reconciliationList" :key="rec.id"><td>{{ rec.id }}</td><td>￥{{ rec.orderAmt.toFixed(2) }}</td><td>￥{{ rec.flowAmt.toFixed(2) }}</td><td>平账</td></tr>
               </tbody>
             </table>
@@ -437,7 +450,7 @@ onMounted(() => {
             <table class="biz-table">
               <thead><tr><th>消费者</th><th>受评菜品</th><th>评分</th><th>评语内容</th><th>操作</th></tr></thead>
               <tbody>
-              <tr v-if="reviewList.length===0"><td colspan="5" style="text-align:center; color:#999;">暂无评价记录</td></tr>
+              <tr v-if="reviewList.length===0"><td colspan="5" style="text-align:center; color:#999;">暂无评价</td></tr>
               <tr v-for="r in reviewList" :key="r.id"><td>{{ r.user }}</td><td>{{ r.dishName }}</td><td style="color: #f57c00;">{{ '★'.repeat(r.rating) }}</td>
                 <td>{{ r.content }} <p v-if="r.reply" style="color:#f57c00; font-size:12px;">↩ 回函：{{ r.reply }}</p></td>
                 <td><button class="btn-link" @click="openReplyDialog(r)">回复</button><button class="btn-link danger" @click="deleteReviewItem(r.id)">删除</button></td>
@@ -461,7 +474,7 @@ onMounted(() => {
     <div v-if="showReplyModal" class="biz-modal">
       <div class="modal-content">
         <div class="modal-header"><h3>回复消费者评价</h3><button @click="showReplyModal = false">×</button></div>
-        <div class="modal-body"><textarea v-model="inputReplyText" placeholder="请输入官方回复词..." style="width:100%; height:100px; padding:10px; border:1px solid #e0d4c3; border-radius:6px; resize:none;"></textarea></div>
+        <div class="modal-body"><textarea v-model="inputReplyText" placeholder="回复内容" style="width:100%; height:100px; padding:10px; border:1px solid #e0d4c3; border-radius:6px; resize:none;"></textarea></div>
         <div class="modal-footer"><button class="btn-cancel" @click="showReplyModal = false">放弃</button><button class="btn-primary" @click="submitReviewReply">发布</button></div>
       </div>
     </div>
@@ -472,18 +485,17 @@ onMounted(() => {
         <div class="modal-body">
           <div class="form-grid">
             <div class="form-group span-2"><label>名称</label><input type="text" v-model="dishForm.name" /></div>
-            <div class="form-group"><label>所属分类</label><select v-model.number="dishForm.type_id" style="padding:8px 12px;border:1px solid #e0d4c3;border-radius:6px"><option :value="null">--请选择分类--</option><option v-for="cat in categoryList" :key="cat.id" :value="cat.id">{{ cat.name }}</option></select></div>
+            <div class="form-group"><label>所属分类</label><select v-model.number="dishForm.type_id" style="padding:8px 12px;border:1px solid #e0d4c3;border-radius:6px"><option :value="null">选择分类</option><option v-for="cat in categoryList" :key="cat.id" :value="cat.id">{{ cat.name }}</option></select></div>
             <div class="form-group"><label>基础售价(元)</label><input type="number" v-model="dishForm.price" /></div>
 
             <div class="form-group span-2">
               <label style="display:flex; align-items:center; gap:8px; cursor: pointer; color: #4e342e; background: #fff8eb; padding: 12px; border-radius: 6px; border: 1px dashed #f57c00;">
-                <input type="checkbox" v-model="dishForm.isRecommend" :true-value="1" :false-value="0" style="width:18px; height:18px;" /> 设为本店热门推荐（在顾客端左侧“热门推荐”独立显示）
+                <input type="checkbox" v-model="dishForm.isRecommend" :true-value="1" :false-value="0" style="width:18px; height:18px;" /> 店长推荐
               </label>
             </div>
 
             <div class="form-group span-2">
-              <label style="color: #4e342e; font-weight: bold; margin-bottom: 4px;">商品详情附属的“推荐搭配”（支持多选）</label>
-              <span style="font-size: 12px; color: #a1887f; margin-bottom: 8px;">在此勾选相关菜品后，顾客查看此菜品详情时，下方会出现你勾选的这些搭配建议。</span>
+              <label style="color: #4e342e; font-weight: bold; margin-bottom: 4px;">推荐搭配</label>
 
               <div class="recommend-select-box">
                 <label
@@ -503,7 +515,7 @@ onMounted(() => {
                   </div>
                 </label>
                 <div v-if="dishList.filter(d => d.id !== editingId).length === 0" style="padding: 20px; color: #999; text-align: center; width: 100%;">
-                  暂无可用来搭配的其他菜品，请先多上架几个菜品~
+                  暂无可选菜品
                 </div>
               </div>
             </div>

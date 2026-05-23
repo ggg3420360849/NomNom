@@ -1,40 +1,67 @@
 <script setup>
-import { onMounted, ref, computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PortalHeader from '../components/PortalHeader.vue'
 import { useNomNomApp } from '../utils/useNomNomApp'
+import { customerApi, fetchAvailableTables } from '../services/api'
 import axios from 'axios'
 
 const router = useRouter()
 const app = useNomNomApp()
+const http = axios.create({ baseURL: '/api', timeout: 10000 })
 
-// axios 配置
-const http = axios.create({
-  baseURL: '/api',
-  timeout: 10000
-})
-
-// 充值功能
 const wallet = ref(0)
 const rechargeVisible = ref(false)
 const rechargeAmount = ref('')
+const detailVisible = ref(false)
+const currentDish = ref({})
+const recommendList = ref([])
+const detailEvaluations = ref([])
+const orderReceiptVisible = ref(false)
+const orderInfo = ref({})
+const categoryList = ref([])
+const activeCategory = ref(null)
+const localMenuItems = ref([])
+const keyword = ref('')
+const tableList = ref([])
+const selectedTableId = ref(null)
+const cart = ref([])
+const orderList = ref([])
+const favoriteIds = ref(new Set())
+const myEvaluations = ref([])
+const evalVisible = ref(false)
+const evaluatingOrder = ref(null)
+const evaluatingItem = ref(null)
+const evaluationForm = ref({ ratingValue: 5, content: '', imageUrls: [] })
+
+const cartCount = computed(() => cart.value.reduce((s, i) => s + i.quantity, 0))
+const cartTotal = computed(() => Number(cart.value.reduce((s, i) => s + i.price * i.quantity, 0).toFixed(2)))
+const selectedTable = computed(() => tableList.value.find(t => t.id === selectedTableId.value))
+const filteredMenuItems = computed(() => {
+  return localMenuItems.value.filter(item => {
+    if (item.status !== 'AVAILABLE' && item.status !== 1) return false
+    const text = `${item.name || ''} ${item.detail || ''} ${item.description || ''}`
+    return keyword.value ? text.includes(keyword.value) : true
+  })
+})
 
 function openRechargeDialog() {
   rechargeAmount.value = ''
   rechargeVisible.value = true
 }
-function doRecharge() {
+
+async function doRecharge() {
   const num = Number(rechargeAmount.value)
   if (!num || num <= 0) return alert('请输入正确金额')
-  wallet.value = Number((wallet.value + num).toFixed(2))
-  alert('充值成功！余额：¥' + wallet.value.toFixed(2))
-  rechargeVisible.value = false
+  try {
+    const res = await customerApi.rechargeWallet(num)
+    wallet.value = Number(res.data?.data?.surplus || 0)
+    rechargeVisible.value = false
+    alert('充值成功！余额：￥' + wallet.value.toFixed(2))
+  } catch (err) {
+    alert(err?.response?.data?.message || '充值失败')
+  }
 }
-
-// 菜品详情弹窗 + 推荐搭配
-const detailVisible = ref(false)
-const currentDish = ref({})
-const recommendList = ref([])
 
 async function openDetail(item) {
   currentDish.value = item
@@ -42,25 +69,23 @@ async function openDetail(item) {
   try {
     const res = await http.get(`/menu/recommend/${item.id}`)
     recommendList.value = res.data.data || []
-  } catch (err) {
+  } catch {
     recommendList.value = []
+  }
+  try {
+    const res = await http.get(`/evaluations/dish/${item.dishesId || item.id}`)
+    detailEvaluations.value = res.data.data || []
+  } catch {
+    detailEvaluations.value = []
   }
 }
 
 function closeDetailModal() {
   detailVisible.value = false
   recommendList.value = []
+  detailEvaluations.value = []
 }
 
-// 订单小票弹窗
-const orderReceiptVisible = ref(false)
-const orderInfo = ref({})
-
-// 分类（用 ID）
-const categoryList = ref([])
-const activeCategory = ref(null) // 这里存分类 ID
-
-// 获取分类
 async function loadCategory() {
   try {
     const res = await http.get('/menu/categories')
@@ -70,15 +95,10 @@ async function loadCategory() {
   }
 }
 
-// 加载菜品（按 typeId 查询）
-const localMenuItems = ref([])
-
 async function loadMenu() {
   try {
     const params = {}
-    if (activeCategory.value != null) {
-      params.category = activeCategory.value // 传分类 ID
-    }
+    if (activeCategory.value != null) params.category = activeCategory.value
     const res = await http.get('/menu/items', { params })
     localMenuItems.value = res.data.data || []
   } catch (err) {
@@ -87,37 +107,62 @@ async function loadMenu() {
   }
 }
 
-// 搜索筛选
-const keyword = ref('')
-const filteredMenuItems = computed(() => {
-  return localMenuItems.value.filter(item => {
-    if (item.status !== 'AVAILABLE' && item.status !== 1) return false
-    const keyMatch = keyword.value
-        ? item.name.includes(keyword.value) || (item.detail || '').includes(keyword.value)
-        : true
-    return keyMatch
-  })
-})
+async function loadTables() {
+  try {
+    tableList.value = await fetchAvailableTables()
+    if (!selectedTableId.value && tableList.value.length > 0) selectedTableId.value = tableList.value[0].id
+  } catch {
+    tableList.value = []
+  }
+}
 
-// 切换分类（传 ID）
+async function loadWallet() {
+  try {
+    const res = await customerApi.getWallet()
+    wallet.value = Number(res.data?.data?.surplus || 0)
+  } catch {
+    wallet.value = 0
+  }
+}
+
+async function loadOrders() {
+  try {
+    const res = await customerApi.getOrders()
+    orderList.value = res.data?.data || []
+  } catch {
+    orderList.value = []
+  }
+}
+
+async function loadCollections() {
+  try {
+    const res = await customerApi.getCollections()
+    favoriteIds.value = new Set((res.data?.data || []).map(item => Number(item.dishesId)))
+  } catch {
+    favoriteIds.value = new Set()
+  }
+}
+
+async function loadMyEvaluations() {
+  try {
+    const res = await customerApi.getMyEvaluations()
+    myEvaluations.value = res.data?.data || []
+  } catch {
+    myEvaluations.value = []
+  }
+}
+
 function changeCategory(catId) {
   activeCategory.value = catId
   loadMenu()
 }
 
-// 购物车
-const cart = ref([])
-const cartCount = computed(() => cart.value.reduce((s, i) => s + i.quantity, 0))
-const cartTotal = computed(() => {
-  const total = cart.value.reduce((s, i) => s + i.price * i.quantity, 0)
-  return Number(total.toFixed(2))
-})
-
 function addToCart(item) {
   const found = cart.value.find(i => i.id === item.id)
   if (found) found.quantity++
-  else cart.value.push({ ...item, quantity: 1 })
+  else cart.value.push({ ...item, price: Number(item.price || 0), quantity: 1 })
 }
+
 function updateQuantity(id, num) {
   const it = cart.value.find(i => i.id === id)
   if (!it) return
@@ -125,21 +170,109 @@ function updateQuantity(id, num) {
   if (it.quantity <= 0) cart.value = cart.value.filter(i => i.id !== id)
 }
 
-// 提交订单
-function handleSubmit() {
+async function handleSubmit() {
   if (cartCount.value === 0) return alert('购物车是空的！')
   if (wallet.value < cartTotal.value) return alert('余额不足，请先充值')
+  if (!selectedTableId.value) return alert('请选择桌台')
 
-  orderInfo.value = {
-    time: new Date().toLocaleString(),
-    items: [...cart.value],
-    total: cartTotal.value,
-    balance: Number((wallet.value - cartTotal.value).toFixed(2))
+  try {
+    const res = await customerApi.createOrder({
+      tableId: selectedTableId.value,
+      tableNumber: selectedTable.value?.number || '',
+      customerName: app.displayName.value,
+      items: cart.value.map(item => ({
+        itemId: item.id,
+        itemName: item.name,
+        quantity: item.quantity,
+        unitPrice: item.price
+      }))
+    })
+    const result = res.data?.data || {}
+    orderInfo.value = {
+      time: new Date().toLocaleString(),
+      orderNo: result.orderNo,
+      tableNumber: selectedTable.value?.number || '',
+      items: [...cart.value],
+      total: cartTotal.value,
+      balance: Number((wallet.value - cartTotal.value).toFixed(2))
+    }
+    await loadWallet()
+    await loadOrders()
+    await loadMenu()
+    orderReceiptVisible.value = true
+    cart.value = []
+  } catch (err) {
+    alert(err?.response?.data?.message || '订单提交失败')
   }
+}
 
-  wallet.value = orderInfo.value.balance
-  orderReceiptVisible.value = true
-  cart.value = []
+function isFavorited(item) {
+  return favoriteIds.value.has(Number(item.dishesId || item.id))
+}
+
+async function toggleFavorite(item) {
+  const dishesId = item.dishesId || item.id
+  try {
+    const res = await customerApi.toggleCollection(dishesId)
+    const next = new Set(favoriteIds.value)
+    if (res.data?.data) next.add(Number(dishesId))
+    else next.delete(Number(dishesId))
+    favoriteIds.value = next
+  } catch (err) {
+    alert(err?.response?.data?.message || '收藏操作失败')
+  }
+}
+
+function orderStatusText(status) {
+  return {
+    PENDING_PAYMENT: '待支付',
+    PAID: '已支付',
+    PREPARING: '制作中',
+    COMPLETED: '已完成',
+    CANCELED: '已取消'
+  }[status] || status || '未知'
+}
+
+function hasEvaluation(orderId, dishesId) {
+  return myEvaluations.value.some(ev => Number(ev.ordersId) === Number(orderId) && Number(ev.dishesId) === Number(dishesId))
+}
+
+function openEvaluation(order, item) {
+  evaluatingOrder.value = order
+  evaluatingItem.value = item
+  evaluationForm.value = { ratingValue: 5, content: '', imageUrls: [] }
+  evalVisible.value = true
+}
+
+async function handleEvaluationImage(event) {
+  const file = event.target.files[0]
+  if (!file) return
+  const formData = new FormData()
+  formData.append('file', file)
+  try {
+    const res = await customerApi.uploadFile(formData)
+    evaluationForm.value.imageUrls.push(res.data?.data || res.data)
+  } catch (err) {
+    alert(err?.response?.data?.message || '图片上传失败')
+  }
+}
+
+async function submitEvaluation() {
+  if (!evaluationForm.value.content.trim()) return alert('请输入评价内容')
+  try {
+    await customerApi.createEvaluation({
+      ordersId: evaluatingOrder.value.id,
+      dishesId: evaluatingItem.value.dishesId,
+      ratingValue: Number(evaluationForm.value.ratingValue),
+      content: evaluationForm.value.content.trim(),
+      imageUrls: evaluationForm.value.imageUrls
+    })
+    evalVisible.value = false
+    await loadMyEvaluations()
+    await loadOrders()
+  } catch (err) {
+    alert(err?.response?.data?.message || '评价失败')
+  }
 }
 
 async function exitPortal() {
@@ -147,90 +280,113 @@ async function exitPortal() {
   await router.push('/login')
 }
 
-// 初始化
 onMounted(() => {
   app.loadPortalData()
   loadCategory()
   loadMenu()
+  loadTables()
+  loadWallet()
+  loadOrders()
+  loadCollections()
+  loadMyEvaluations()
 })
 </script>
 
 <template>
   <div class="portal-shell">
     <PortalHeader
-        title="顾客端点餐台"
-        :display-name="app.displayName.value"
-        :role-label="app.currentUser.value.roleLabel"
-        :loading="app.pageLoading.value"
-        @logout="exitPortal"
+      title="顾客端点餐台"
+      :display-name="app.displayName.value"
+      :role-label="app.currentUser.value?.roleLabel || '顾客'"
+      :loading="app.pageLoading.value"
+      @logout="exitPortal"
     />
 
     <div class="wallet-bar">
-      <span>余额：¥{{ wallet.toFixed(2) }}</span>
+      <span>余额：￥{{ wallet.toFixed(2) }}</span>
+      <select v-model.number="selectedTableId" class="table-select">
+        <option :value="null">选择桌台</option>
+        <option v-for="table in tableList" :key="table.id" :value="table.id">
+          {{ table.area || '大厅' }} · {{ table.number }}号桌 · {{ table.personNumber || 2 }}人
+        </option>
+      </select>
       <button class="recharge-btn" @click="openRechargeDialog">充值</button>
     </div>
 
     <div class="main-layout">
-      <!-- 左侧分类栏 -->
       <aside class="category-sidebar">
-        <button
-            class="category-btn"
-            :class="{ active: activeCategory === null }"
-            @click="changeCategory(null)"
-        >
+        <button class="category-btn" :class="{ active: activeCategory === null }" @click="changeCategory(null)">
           全部
         </button>
         <button
-            v-for="cat in categoryList"
-            :key="cat.code"
-            class="category-btn"
-            :class="{ active: activeCategory === cat.code }"
-            @click="changeCategory(cat.code)"
+          v-for="cat in categoryList"
+          :key="cat.code"
+          class="category-btn"
+          :class="{ active: activeCategory === cat.code }"
+          @click="changeCategory(cat.code)"
         >
           {{ cat.name }}
         </button>
       </aside>
 
-      <!-- 菜单 -->
       <section class="menu-area">
         <div class="search-box">
-          <input
-              v-model.lazy="keyword"
-              class="search-input"
-              type="text"
-              placeholder="搜索菜品或套餐"
-          />
+          <input v-model.lazy="keyword" class="search-input" type="text" placeholder="搜索菜品或套餐" />
         </div>
 
         <div class="menu-list">
-          <article
-              v-for="item in filteredMenuItems"
-              :key="item.id"
-              class="menu-card"
-              @click="openDetail(item)"
-          >
-            <img :src="item.coverUrl" class="menu-image" />
+          <article v-for="item in filteredMenuItems" :key="item.id" class="menu-card" @click="openDetail(item)">
+            <button class="fav-btn" :class="{ active: isFavorited(item) }" @click.stop="toggleFavorite(item)">
+              {{ isFavorited(item) ? '已藏' : '收藏' }}
+            </button>
+            <img :src="item.coverUrl || '/placeholder.png'" class="menu-image" />
             <h3 class="menu-title">{{ item.name }}</h3>
-            <p class="menu-price">¥{{ item.price.toFixed(2) }}</p>
+            <p class="menu-sales">月售 {{ item.monthlySales || 0 }}</p>
+            <p class="menu-price">￥{{ Number(item.price || 0).toFixed(2) }}</p>
             <button class="add-btn" @click.stop="addToCart(item)">+</button>
           </article>
         </div>
+
+        <section class="order-history">
+          <div class="history-title">
+            <h3>我的订单</h3>
+            <button @click="loadOrders">刷新</button>
+          </div>
+          <div v-if="orderList.length === 0" class="empty-hint">暂无订单</div>
+          <article v-for="order in orderList" :key="order.id" class="history-card">
+            <div class="history-head">
+              <span>{{ order.orderNo }}</span>
+              <strong>{{ orderStatusText(order.status) }}</strong>
+            </div>
+            <p class="history-meta">
+              {{ order.createTime || '-' }} · {{ order.tableNumber ? order.tableNumber + '号桌' : '未记录桌台' }} ·
+              ￥{{ Number(order.totalAmount || 0).toFixed(2) }}
+            </p>
+            <div class="history-items">
+              <div v-for="item in order.items || []" :key="item.id" class="history-item">
+                <span>{{ item.name }} x{{ item.quantity }}</span>
+                <button
+                  v-if="order.status === 'COMPLETED' && !hasEvaluation(order.id, item.dishesId)"
+                  @click="openEvaluation(order, item)"
+                >
+                  评价
+                </button>
+                <em v-else-if="hasEvaluation(order.id, item.dishesId)">已评价</em>
+              </div>
+            </div>
+          </article>
+        </section>
       </section>
     </div>
 
-    <!-- 底部购物车 -->
     <footer class="cart-footer">
       <div class="cart-summary">
         <div class="cart-info">
-          <span class="cart-count">共 {{ cartCount }} 件</span>
-          <span class="cart-total">合计：¥{{ cartTotal.toFixed(2) }}</span>
+          <span class="cart-count">共 {{ cartCount }} 份</span>
+          <span class="cart-total">合计：￥{{ cartTotal.toFixed(2) }}</span>
         </div>
-        <button
-            class="submit-btn"
-            :disabled="cartCount === 0 || wallet < cartTotal"
-            @click="handleSubmit"
-        >
-          提交订单
+        <button class="submit-btn" :disabled="cartCount === 0 || wallet < cartTotal" @click="handleSubmit">
+          提交并支付
         </button>
       </div>
 
@@ -238,7 +394,7 @@ onMounted(() => {
         <article v-for="item in cart" :key="item.id" class="cart-item">
           <div class="item-info">
             <h3>{{ item.name }}</h3>
-            <p>单价 ￥{{ item.price.toFixed(2) }}</p>
+            <p>单价 ￥{{ Number(item.price || 0).toFixed(2) }}</p>
           </div>
           <div class="quantity-control">
             <button class="qty-btn" @click="updateQuantity(item.id, -1)">-</button>
@@ -246,15 +402,14 @@ onMounted(() => {
             <button class="qty-btn" @click="updateQuantity(item.id, 1)">+</button>
           </div>
         </article>
-        <p v-if="cart.length === 0" class="empty-hint">购物车还是空的~</p>
+        <p v-if="cart.length === 0" class="empty-hint">购物车为空</p>
       </div>
     </footer>
 
-    <!-- 充值弹窗 -->
     <div v-if="rechargeVisible" class="modal-overlay" @click.self="rechargeVisible = false">
       <div class="modal">
         <h3>模拟充值</h3>
-        <input v-model.number="rechargeAmount" type="number" placeholder="输入金额" />
+        <input v-model.number="rechargeAmount" type="number" placeholder="金额" />
         <div class="modal-buttons">
           <button @click="rechargeVisible = false">取消</button>
           <button class="primary-button" @click="doRecharge">确认</button>
@@ -262,13 +417,12 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 菜品详情 -->
     <div v-if="detailVisible" class="modal-overlay" @click.self="closeDetailModal">
       <div class="modal modal-lg">
-        <img :src="currentDish.coverUrl" class="detail-img" />
+        <img :src="currentDish.coverUrl || '/placeholder.png'" class="detail-img" />
         <h3>{{ currentDish.name }}</h3>
-        <p>{{ currentDish.detail }}</p>
-        <p class="detail-price">¥{{ currentDish.price.toFixed(2) }}</p>
+        <p>{{ currentDish.description || currentDish.detail }}</p>
+        <p class="detail-price">￥{{ Number(currentDish.price || 0).toFixed(2) }}</p>
         <button class="primary-button" @click="addToCart(currentDish)">加入购物车</button>
 
         <div class="recommend-wrap">
@@ -276,40 +430,70 @@ onMounted(() => {
           <div class="recommend-list">
             <div v-if="recommendList.length === 0" class="no-recommend">暂无</div>
             <div v-for="rec in recommendList" :key="rec.id" class="recommend-item">
-              <img :src="rec.coverUrl" class="rec-img" />
+              <img :src="rec.coverUrl || '/placeholder.png'" class="rec-img" />
               <div class="rec-info">
                 <div class="rec-name">{{ rec.name }}</div>
-                <div class="rec-price">¥{{ rec.price.toFixed(2) }}</div>
+                <div class="rec-price">￥{{ Number(rec.price || 0).toFixed(2) }}</div>
               </div>
               <button class="rec-add-btn" @click="addToCart(rec)">+</button>
             </div>
           </div>
         </div>
+
+        <div class="recommend-wrap">
+          <h4 class="recommend-title">顾客评价</h4>
+          <div v-if="detailEvaluations.length === 0" class="no-recommend">暂无</div>
+          <div v-for="ev in detailEvaluations" :key="ev.id" class="evaluation-line">
+            <strong>{{ '★'.repeat(ev.ratingValue || 0) }}</strong>
+            <span>{{ ev.content }}</span>
+            <small v-if="ev.replyContent">商家回复：{{ ev.replyContent }}</small>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- 订单小票 -->
+    <div v-if="evalVisible" class="modal-overlay" @click.self="evalVisible = false">
+      <div class="modal">
+        <h3>评价菜品</h3>
+        <p class="eval-dish-name">{{ evaluatingItem?.name }}</p>
+        <select v-model.number="evaluationForm.ratingValue" class="eval-select">
+          <option v-for="n in 5" :key="n" :value="n">{{ n }} 星</option>
+        </select>
+        <textarea v-model="evaluationForm.content" class="eval-textarea" placeholder="评价内容"></textarea>
+        <input type="file" accept="image/*" @change="handleEvaluationImage" />
+        <div class="eval-images">
+          <img v-for="url in evaluationForm.imageUrls" :key="url" :src="url" />
+        </div>
+        <div class="modal-buttons">
+          <button @click="evalVisible = false">取消</button>
+          <button class="primary-button" @click="submitEvaluation">提交</button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="orderReceiptVisible" class="modal-overlay" @click.self="orderReceiptVisible = false">
       <div class="modal receipt-modal">
         <div class="receipt-header">
           <h3>订单支付成功</h3>
           <p>{{ orderInfo.time }}</p>
+          <p v-if="orderInfo.orderNo">订单号：{{ orderInfo.orderNo }}</p>
+          <p v-if="orderInfo.tableNumber">桌台：{{ orderInfo.tableNumber }}号桌</p>
         </div>
         <div class="receipt-body">
           <div class="receipt-item" v-for="(item, idx) in orderInfo.items" :key="idx">
             <div class="name">{{ item.name }}</div>
             <div class="count">x{{ item.quantity }}</div>
-            <div class="sub">¥{{ (item.price * item.quantity).toFixed(2) }}</div>
+            <div class="sub">￥{{ (item.price * item.quantity).toFixed(2) }}</div>
           </div>
         </div>
         <div class="line"></div>
         <div class="total-row">
           <span>实付金额</span>
-          <span>¥{{ orderInfo.total }}</span>
+          <span>￥{{ orderInfo.total }}</span>
         </div>
         <div class="balance-row">
           <span>剩余余额</span>
-          <span>¥{{ orderInfo.balance }}</span>
+          <span>￥{{ wallet.toFixed(2) }}</span>
         </div>
         <button class="close-btn" @click="orderReceiptVisible = false">完成</button>
       </div>
@@ -318,7 +502,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* 样式完全不变，保持你原来的样式 */
 .portal-shell {
   display: flex;
   flex-direction: column;
@@ -327,11 +510,20 @@ onMounted(() => {
 }
 .wallet-bar {
   display: flex;
+  align-items: center;
+  gap: 12px;
   justify-content: space-between;
   padding: 10px 20px;
   background: #fff;
   border-bottom: 1px solid #eee;
   font-weight: bold;
+}
+.table-select {
+  flex: 1;
+  max-width: 320px;
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
 }
 .recharge-btn {
   background: #4CAF50;
@@ -390,7 +582,7 @@ onMounted(() => {
   gap: 10px;
 }
 .menu-card {
-  aspect-ratio: 1 / 1;
+  aspect-ratio: 1 / 1.18;
   border: 1px solid #eee;
   border-radius: 8px;
   padding: 8px;
@@ -400,6 +592,21 @@ onMounted(() => {
   justify-content: center;
   cursor: pointer;
   position: relative;
+}
+.fav-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  border: none;
+  background: rgba(255, 255, 255, 0.92);
+  color: #666;
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 2px 5px;
+  cursor: pointer;
+}
+.fav-btn.active {
+  color: #ff4d4f;
 }
 .menu-image {
   width: 100%;
@@ -413,6 +620,11 @@ onMounted(() => {
   margin: 0 0 4px;
   text-align: center;
   line-height: 1.2;
+}
+.menu-sales {
+  font-size: 11px;
+  color: #999;
+  margin: 0 0 2px;
 }
 .menu-price {
   font-size: 11px;
@@ -434,6 +646,53 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+}
+.order-history {
+  margin-top: 16px;
+  border-top: 1px solid #eee;
+  padding-top: 12px;
+}
+.history-title,
+.history-head,
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.history-title h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.history-title button,
+.history-item button {
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.history-card {
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 8px;
+  background: #fff;
+}
+.history-head span {
+  font-weight: bold;
+}
+.history-head strong {
+  color: #1890ff;
+}
+.history-meta,
+.history-item em {
+  color: #888;
+  font-size: 12px;
+}
+.history-items {
+  display: grid;
+  gap: 6px;
 }
 .cart-footer {
   background: #fff;
@@ -534,6 +793,34 @@ onMounted(() => {
   max-height: 80vh;
   overflow-y: auto;
 }
+.modal input,
+.eval-select,
+.eval-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+.eval-textarea {
+  height: 90px;
+  resize: none;
+}
+.eval-dish-name {
+  color: #666;
+}
+.eval-images {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.eval-images img {
+  width: 50px;
+  height: 50px;
+  object-fit: cover;
+  border-radius: 4px;
+}
 .detail-img {
   width: 100%;
   height: 180px;
@@ -591,12 +878,11 @@ onMounted(() => {
   flex: 1;
   padding: 0 8px;
 }
-.rec-name {
-  font-size: 12px;
-  margin-bottom: 3px;
-}
+.rec-name,
 .rec-price {
   font-size: 12px;
+}
+.rec-price {
   color: #f53f3f;
 }
 .rec-add-btn {
@@ -608,9 +894,35 @@ onMounted(() => {
   color: #fff;
   cursor: pointer;
   font-size: 14px;
+}
+.evaluation-line {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 13px;
+}
+.evaluation-line strong {
+  color: #f57c00;
+}
+.evaluation-line small {
+  color: #666;
+}
+.modal-buttons {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.modal-buttons button {
+  border: 1px solid #ddd;
+  background: #fff;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.modal-buttons .primary-button {
+  border: none;
+  background: #1890ff;
 }
 .receipt-modal {
   width: 380px;
@@ -623,7 +935,7 @@ onMounted(() => {
   color: #1890ff;
 }
 .receipt-header p {
-  margin: 0 0 16px;
+  margin: 0 0 6px;
   color: #666;
   font-size: 12px;
 }

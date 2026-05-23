@@ -14,6 +14,8 @@ public class OrdersEntity {
     private Long id;
     private String code;
     private Long userId;
+    private Long tableId;
+    private String tableNumber;
     private Integer status;
     private BigDecimal totalPrice;
     private LocalDateTime serveFoodTime;
@@ -42,6 +44,22 @@ public class OrdersEntity {
 
     public void setUserId(Long userId) {
         this.userId = userId;
+    }
+
+    public Long getTableId() {
+        return tableId;
+    }
+
+    public void setTableId(Long tableId) {
+        this.tableId = tableId;
+    }
+
+    public String getTableNumber() {
+        return tableNumber;
+    }
+
+    public void setTableNumber(String tableNumber) {
+        this.tableNumber = tableNumber;
     }
 
     public Integer getStatus() {

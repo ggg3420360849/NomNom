@@ -2,11 +2,15 @@ package com.nomnom.backend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.nomnom.backend.entity.DishesEvaluationsEntity;
+import com.nomnom.backend.entity.DishesPackageEntity;
 import com.nomnom.backend.entity.ImagesEntity;
 import com.nomnom.backend.entity.OrdersEntity;
+import com.nomnom.backend.entity.OrdersItemEntity;
 import com.nomnom.backend.mapper.DishesEvaluationsMapper;
+import com.nomnom.backend.mapper.DishesPackageMapper;
 import com.nomnom.backend.mapper.EvaluationReadMapper;
 import com.nomnom.backend.mapper.ImagesMapper;
+import com.nomnom.backend.mapper.OrdersItemMapper;
 import com.nomnom.backend.mapper.OrdersMapper;
 import com.nomnom.backend.model.EvaluationRequest;
 import com.nomnom.backend.model.EvaluationResponse;
@@ -24,15 +28,21 @@ public class DishesEvaluationsService {
     private final EvaluationReadMapper evaluationReadMapper;
     private final ImagesMapper imagesMapper;
     private final OrdersMapper ordersMapper;
+    private final OrdersItemMapper ordersItemMapper;
+    private final DishesPackageMapper packageMapper;
 
     public DishesEvaluationsService(DishesEvaluationsMapper evaluationsMapper,
                                     EvaluationReadMapper evaluationReadMapper,
                                     ImagesMapper imagesMapper,
-                                    OrdersMapper ordersMapper) {
+                                    OrdersMapper ordersMapper,
+                                    OrdersItemMapper ordersItemMapper,
+                                    DishesPackageMapper packageMapper) {
         this.evaluationsMapper = evaluationsMapper;
         this.evaluationReadMapper = evaluationReadMapper;
         this.imagesMapper = imagesMapper;
         this.ordersMapper = ordersMapper;
+        this.ordersItemMapper = ordersItemMapper;
+        this.packageMapper = packageMapper;
     }
 
     public List<EvaluationResponse> getDishEvaluations(Long dishesId) {
@@ -49,9 +59,29 @@ public class DishesEvaluationsService {
 
     @Transactional
     public void createEvaluation(Long userId, EvaluationRequest request) {
+        if (request.getOrdersId() == null || request.getDishesId() == null) {
+            throw new IllegalArgumentException("订单和菜品不能为空。");
+        }
+        if (request.getRatingValue() == null || request.getRatingValue() < 1 || request.getRatingValue() > 5) {
+            throw new IllegalArgumentException("评分必须在 1 到 5 星之间。");
+        }
+
         OrdersEntity order = ordersMapper.selectById(request.getOrdersId());
-        if (order == null || !order.getUserId().equals(userId.intValue())) {
-            throw new IllegalArgumentException("订单不存在或无权评价");
+        if (order == null || !order.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("订单不存在或无权评价。");
+        }
+        if (order.getStatus() == null || order.getStatus() != 4) {
+            throw new IllegalArgumentException("订单完成后才能评价。");
+        }
+        if (!orderContainsDish(request.getOrdersId(), request.getDishesId())) {
+            throw new IllegalArgumentException("只能评价该订单中购买过的菜品。");
+        }
+        Long existing = evaluationsMapper.selectCount(new LambdaQueryWrapper<DishesEvaluationsEntity>()
+                .eq(DishesEvaluationsEntity::getUserId, userId.intValue())
+                .eq(DishesEvaluationsEntity::getOrdersId, request.getOrdersId().intValue())
+                .eq(DishesEvaluationsEntity::getDishesId, request.getDishesId().intValue()));
+        if (existing > 0) {
+            throw new IllegalArgumentException("该菜品已经评价过。");
         }
 
         DishesEvaluationsEntity entity = new DishesEvaluationsEntity();
@@ -80,12 +110,27 @@ public class DishesEvaluationsService {
     public void replyByMerchant(Long evaluationId, String replyContent) {
         DishesEvaluationsEntity entity = evaluationsMapper.selectById(evaluationId);
         if (entity == null) {
-            throw new IllegalArgumentException("评价不存在");
+            throw new IllegalArgumentException("评价不存在。");
         }
         entity.setReplyContent(replyContent);
         entity.setReplyTime(LocalDateTime.now());
         entity.setReplyStatus(1);
         evaluationsMapper.updateById(entity);
+    }
+
+    private boolean orderContainsDish(Long orderId, Long dishesId) {
+        List<OrdersItemEntity> items = ordersItemMapper.selectList(new LambdaQueryWrapper<OrdersItemEntity>()
+                .eq(OrdersItemEntity::getOrdersId, orderId));
+        for (OrdersItemEntity item : items) {
+            if (item.getDishesPackageId() == null) {
+                continue;
+            }
+            DishesPackageEntity pkg = packageMapper.selectById(item.getDishesPackageId());
+            if (pkg != null && pkg.getDishesId() != null && pkg.getDishesId().equals(dishesId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void attachImages(List<EvaluationResponse> evaluations) {

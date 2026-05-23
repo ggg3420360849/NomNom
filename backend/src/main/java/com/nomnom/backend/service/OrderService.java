@@ -2,11 +2,16 @@ package com.nomnom.backend.service;
 
 import com.nomnom.backend.entity.OrdersEntity;
 import com.nomnom.backend.entity.OrdersItemEntity;
+import com.nomnom.backend.entity.DishesEntity;
+import com.nomnom.backend.entity.DishesTableEntity;
+import com.nomnom.backend.mapper.DishesMapper;
+import com.nomnom.backend.mapper.DishesTableMapper;
 import com.nomnom.backend.mapper.OrderReadMapper;
 import com.nomnom.backend.mapper.OrdersItemMapper;
 import com.nomnom.backend.mapper.OrdersMapper;
 import com.nomnom.backend.mapper.PackageReadMapper;
 import com.nomnom.backend.model.OrderDraftRequest;
+import com.nomnom.backend.model.OrderItemSummary;
 import com.nomnom.backend.model.OrderItemRequest;
 import com.nomnom.backend.model.OrderSummary;
 import com.nomnom.backend.model.PackageSnapshot;
@@ -36,21 +41,40 @@ public class OrderService {
     private final PackageReadMapper packageReadMapper;
     private final OrdersMapper ordersMapper;
     private final OrdersItemMapper ordersItemMapper;
+    private final DishesMapper dishesMapper;
+    private final DishesTableMapper tableMapper;
+    private final WalletService walletService;
 
     public OrderService(
             OrderReadMapper orderReadMapper,
             PackageReadMapper packageReadMapper,
             OrdersMapper ordersMapper,
-            OrdersItemMapper ordersItemMapper
+            OrdersItemMapper ordersItemMapper,
+            DishesMapper dishesMapper,
+            DishesTableMapper tableMapper,
+            WalletService walletService
     ) {
         this.orderReadMapper = orderReadMapper;
         this.packageReadMapper = packageReadMapper;
         this.ordersMapper = ordersMapper;
         this.ordersItemMapper = ordersItemMapper;
+        this.dishesMapper = dishesMapper;
+        this.tableMapper = tableMapper;
+        this.walletService = walletService;
     }
 
     public List<OrderSummary> getCurrentOrders(Long userId) {
-        return orderReadMapper.selectCurrentOrders(userId);
+        List<OrderSummary> orders = orderReadMapper.selectCurrentOrders(userId);
+        List<Long> orderIds = orders.stream().map(OrderSummary::getId).filter(Objects::nonNull).collect(Collectors.toList());
+        if (orderIds.isEmpty()) {
+            return orders;
+        }
+        Map<Long, List<OrderItemSummary>> itemMap = orderReadMapper.selectOrderItems(orderIds).stream()
+                .collect(Collectors.groupingBy(OrderItemSummary::getOrderId));
+        for (OrderSummary order : orders) {
+            order.setItems(itemMap.getOrDefault(order.getId(), List.of()));
+        }
+        return orders;
     }
 
     public Map<String, Object> preview(OrderDraftRequest request) {
@@ -69,12 +93,22 @@ public class OrderService {
     public OrderSummary createDraftOrder(OrderDraftRequest request) {
         ResolvedOrder resolvedOrder = resolveOrder(request);
         LocalDateTime now = LocalDateTime.now();
+        DishesTableEntity table = resolveTable(request);
+        String orderCode = generateOrderCode(now);
+        walletService.pay(request.getUserId(), resolvedOrder.totalAmount, orderCode);
 
         OrdersEntity order = new OrdersEntity();
-        order.setCode(generateOrderCode(now));
+        order.setCode(orderCode);
         order.setUserId(request.getUserId());
-        order.setStatus(1);
+        if (table != null) {
+            order.setTableId(table.getId());
+            order.setTableNumber(table.getNumber());
+        } else {
+            order.setTableNumber(normalizeText(request.getTableNumber()));
+        }
+        order.setStatus(2);
         order.setTotalPrice(resolvedOrder.totalAmount);
+        order.setPayTime(now);
         order.setCreateTime(now);
         ordersMapper.insert(order);
 
@@ -91,13 +125,16 @@ public class OrderService {
             ordersItemMapper.insert(orderItem);
         }
 
-        return new OrderSummary(
-                order.getCode(),
-                resolveCustomerName(request),
-                "PENDING_PAYMENT",
-                resolvedOrder.totalAmount.doubleValue(),
-                resolvedOrder.itemCount
-        );
+        deductStock(resolvedOrder.lines);
+        updateTableAfterPayment(table, resolvedOrder.totalAmount);
+
+        OrderSummary summary = new OrderSummary(order.getCode(), resolveCustomerName(request), "PAID",
+                resolvedOrder.totalAmount.doubleValue(), resolvedOrder.itemCount);
+        summary.setId(order.getId());
+        summary.setTableId(order.getTableId());
+        summary.setTableNumber(order.getTableNumber());
+        summary.setCreateTime(order.getCreateTime());
+        return summary;
     }
 
     private ResolvedOrder resolveOrder(OrderDraftRequest request) {
@@ -136,10 +173,16 @@ public class OrderService {
             if (requestItem.getQuantity() <= 0) {
                 throw new IllegalArgumentException("Quantity must be greater than 0.");
             }
+            if (requestItem.getQuantity() > 99) {
+                throw new IllegalArgumentException("Quantity cannot exceed 99.");
+            }
 
             PackageSnapshot snapshot = snapshotMap.get(requestItem.getItemId());
             if (snapshot.getDishStatus() == null || snapshot.getDishStatus() != 1) {
                 throw new IllegalArgumentException("Package " + requestItem.getItemId() + " is currently unavailable.");
+            }
+            if (snapshot.getStock() != null && snapshot.getStock() < requestItem.getQuantity()) {
+                throw new IllegalArgumentException(snapshot.getDishName() + " 库存不足。");
             }
 
             BigDecimal lineTotal = snapshot.getPrice().multiply(BigDecimal.valueOf(requestItem.getQuantity()));
@@ -149,6 +192,50 @@ public class OrderService {
         }
 
         return new ResolvedOrder(lines, totalAmount, itemCount);
+    }
+
+    private DishesTableEntity resolveTable(OrderDraftRequest request) {
+        if (request.getTableId() == null) {
+            return null;
+        }
+        DishesTableEntity table = tableMapper.selectById(request.getTableId());
+        if (table == null) {
+            throw new IllegalArgumentException("桌台不存在。");
+        }
+        return table;
+    }
+
+    private void deductStock(List<ResolvedOrderLine> lines) {
+        Map<Long, Integer> quantityByDish = lines.stream()
+                .filter(line -> line.snapshot.getDishesId() != null)
+                .collect(Collectors.groupingBy(
+                        line -> line.snapshot.getDishesId(),
+                        Collectors.summingInt(line -> line.quantity)));
+
+        for (Map.Entry<Long, Integer> entry : quantityByDish.entrySet()) {
+            DishesEntity dish = dishesMapper.selectById(entry.getKey().intValue());
+            if (dish == null || dish.getStock() == null) {
+                continue;
+            }
+            if (dish.getStock() < entry.getValue()) {
+                throw new IllegalArgumentException(dish.getName() + " 库存不足。");
+            }
+            dish.setStock(dish.getStock() - entry.getValue());
+            if (dish.getStock() <= 0) {
+                dish.setStatus(0);
+            }
+            dishesMapper.updateById(dish);
+        }
+    }
+
+    private void updateTableAfterPayment(DishesTableEntity table, BigDecimal amount) {
+        if (table == null) {
+            return;
+        }
+        BigDecimal current = table.getAmount() != null ? table.getAmount() : BigDecimal.ZERO;
+        table.setAmount(current.add(amount));
+        table.setStatus(1);
+        tableMapper.updateById(table);
     }
 
     private String resolveCustomerName(OrderDraftRequest request) {

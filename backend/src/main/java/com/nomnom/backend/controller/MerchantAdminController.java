@@ -133,6 +133,7 @@ public class MerchantAdminController {
         return ApiResponse.ok(toDetail(dish, packages));
     }
 
+    @Transactional
     @PostMapping("/dishes/add")
     public ApiResponse<Void> addDish(@RequestBody AddDishRequest request) {
         DishesEntity dish = new DishesEntity();
@@ -150,6 +151,7 @@ public class MerchantAdminController {
         return ApiResponse.ok("新增成功", null);
     }
 
+    @Transactional
     @PutMapping("/dishes/{id}")
     public ApiResponse<Void> updateDish(@PathVariable Integer id, @RequestBody AddDishRequest request) {
         DishesEntity dish = dishesMapper.selectById(id);

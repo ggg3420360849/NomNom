@@ -50,6 +50,38 @@ public class WalletService {
     }
 
     @Transactional
+    public WalletEntity recharge(Long userId, BigDecimal amount) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("充值金额必须大于 0。");
+        }
+        WalletEntity wallet = createWallet(userId, 1);
+        BigDecimal current = wallet.getSurplus() != null ? wallet.getSurplus() : BigDecimal.ZERO;
+        wallet.setSurplus(current.add(amount));
+        walletMapper.updateById(wallet);
+        recordWalletInfo(wallet.getId(), "钱包充值", amount);
+        return wallet;
+    }
+
+    @Transactional
+    public WalletEntity pay(Long userId, BigDecimal amount, String orderCode) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("支付金额必须大于 0。");
+        }
+        WalletEntity wallet = createWallet(userId, 1);
+        if (wallet.getStatus() != null && wallet.getStatus() == 0) {
+            throw new IllegalArgumentException("钱包已冻结，暂不能支付。");
+        }
+        BigDecimal current = wallet.getSurplus() != null ? wallet.getSurplus() : BigDecimal.ZERO;
+        if (current.compareTo(amount) < 0) {
+            throw new IllegalArgumentException("钱包余额不足，请先充值。");
+        }
+        wallet.setSurplus(current.subtract(amount));
+        walletMapper.updateById(wallet);
+        recordWalletInfo(wallet.getId(), "订单支付" + (orderCode != null ? "：" + orderCode : ""), amount.negate());
+        return wallet;
+    }
+
+    @Transactional
     public WalletEntity createWallet(Long userId, Integer type) {
         WalletEntity existing = getWallet(userId);
         if (existing != null) {
@@ -63,6 +95,15 @@ public class WalletService {
         entity.setSurplus(BigDecimal.ZERO);
         walletMapper.insert(entity);
         return entity;
+    }
+
+    private void recordWalletInfo(Integer walletId, String detail, BigDecimal amount) {
+        WalletInfoEntity info = new WalletInfoEntity();
+        info.setWalletId(walletId);
+        info.setDetail(detail);
+        info.setSurplusMoney(amount);
+        info.setCreateTime(LocalDateTime.now());
+        walletInfoMapper.insert(info);
     }
 
     @Transactional

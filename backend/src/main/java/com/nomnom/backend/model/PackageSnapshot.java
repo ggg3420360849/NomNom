@@ -5,12 +5,14 @@ import java.math.BigDecimal;
 public class PackageSnapshot {
 
     private Long packageId;
+    private Long dishesId;
     private String dishName;
     private String packageName;
     private String specs;
     private String coverUrl;
     private BigDecimal price;
     private Integer dishStatus;
+    private Integer stock;
 
     public Long getPackageId() {
         return packageId;
@@ -18,6 +20,14 @@ public class PackageSnapshot {
 
     public void setPackageId(Long packageId) {
         this.packageId = packageId;
+    }
+
+    public Long getDishesId() {
+        return dishesId;
+    }
+
+    public void setDishesId(Long dishesId) {
+        this.dishesId = dishesId;
     }
 
     public String getDishName() {
@@ -66,6 +76,14 @@ public class PackageSnapshot {
 
     public void setDishStatus(Integer dishStatus) {
         this.dishStatus = dishStatus;
+    }
+
+    public Integer getStock() {
+        return stock;
+    }
+
+    public void setStock(Integer stock) {
+        this.stock = stock;
     }
 
     public String resolveDisplayName() {

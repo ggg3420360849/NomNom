@@ -3,6 +3,7 @@ package com.nomnom.backend.model;
 public class MenuItem {
 
     private Long id;
+    private Long dishesId;
     private String name;
     private String category;
     private String categoryLabel;
@@ -11,6 +12,7 @@ public class MenuItem {
     private String coverUrl;
     private String status;
     private int monthlySales;
+    private boolean recommend;
 
     public MenuItem() {
     }
@@ -33,6 +35,14 @@ public class MenuItem {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public Long getDishesId() {
+        return dishesId;
+    }
+
+    public void setDishesId(Long dishesId) {
+        this.dishesId = dishesId;
     }
 
     public String getName() {
@@ -97,5 +107,13 @@ public class MenuItem {
 
     public void setMonthlySales(int monthlySales) {
         this.monthlySales = monthlySales;
+    }
+
+    public boolean isRecommend() {
+        return recommend;
+    }
+
+    public void setRecommend(boolean recommend) {
+        this.recommend = recommend;
     }
 }

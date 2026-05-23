@@ -24,18 +24,7 @@ async function submitRegister() {
 <template>
   <div class="auth-shell">
     <section class="auth-brand">
-      <p class="eyebrow">NomNom Access</p>
       <h1>餐厅系统登录入口</h1>
-      <p class="auth-copy">
-        登录和注册都基于现有的 <code>user</code> 表。登录后会根据账号角色自动进入对应门户，
-        商家端和顾客端完全分开，便于你们后续继续协作开发。
-      </p>
-      <div class="auth-role-list">
-        <article v-for="portal in app.portalOptions" :key="portal.code" class="auth-role-card">
-          <h3>{{ portal.label }}</h3>
-          <p>{{ portal.description }}</p>
-        </article>
-      </div>
     </section>
 
     <section class="auth-panel">
@@ -59,11 +48,11 @@ async function submitRegister() {
 
         <label>
           <span>账号</span>
-          <input v-model="app.loginForm.account" type="text" placeholder="请输入账号" />
+          <input v-model="app.loginForm.account" type="text" placeholder="账号" />
         </label>
         <label>
           <span>密码</span>
-          <input v-model="app.loginForm.password" type="password" placeholder="请输入密码" />
+          <input v-model="app.loginForm.password" type="password" placeholder="密码" />
         </label>
 
         <button class="primary-button wide-button" :disabled="app.authLoading.value" @click="submitLogin">
