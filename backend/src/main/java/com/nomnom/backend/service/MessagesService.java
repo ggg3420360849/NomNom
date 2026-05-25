@@ -2,7 +2,9 @@ package com.nomnom.backend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.nomnom.backend.entity.MessagesEntity;
+import com.nomnom.backend.entity.UserEntity;
 import com.nomnom.backend.mapper.MessagesMapper;
+import com.nomnom.backend.mapper.UserMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,9 +15,11 @@ import java.util.List;
 public class MessagesService {
 
     private final MessagesMapper messagesMapper;
+    private final UserMapper userMapper;
 
-    public MessagesService(MessagesMapper messagesMapper) {
+    public MessagesService(MessagesMapper messagesMapper, UserMapper userMapper) {
         this.messagesMapper = messagesMapper;
+        this.userMapper = userMapper;
     }
 
     public List<MessagesEntity> getUserMessages(Long userId) {
@@ -60,12 +64,37 @@ public class MessagesService {
 
     @Transactional
     public void createMessage(Long userId, String content, Integer type) {
+        if (userId == null || content == null || content.trim().isEmpty()) {
+            return;
+        }
         MessagesEntity entity = new MessagesEntity();
         entity.setUserId(userId.intValue());
-        entity.setContent(content);
+        entity.setContent(truncate(content.trim(), 255));
         entity.setType(type);
         entity.setReadStatus(0);
         entity.setCreateTime(LocalDateTime.now());
         messagesMapper.insert(entity);
+    }
+
+    @Transactional
+    public void createMessageForRole(Integer role, String content, Integer type) {
+        if (role == null || content == null || content.trim().isEmpty()) {
+            return;
+        }
+        List<UserEntity> users = userMapper.selectList(
+                new LambdaQueryWrapper<UserEntity>()
+                        .eq(UserEntity::getRole, role));
+        for (UserEntity user : users) {
+            if (user.getId() != null) {
+                createMessage(user.getId(), content, type);
+            }
+        }
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength - 1) + "…";
     }
 }

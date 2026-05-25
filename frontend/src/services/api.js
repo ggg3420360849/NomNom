@@ -148,12 +148,12 @@ export const merchantApi = {
   deleteCategory: (id) => axiosRequest.delete(`/admin/categories/${id}`),
 
   // --- B02 订单与桌台 ---
-  submitOrder: (data) => axiosRequest.post('/customer/orders', data),
   getOrders: (status) => axiosRequest.get('/admin/orders', { params: status != null ? { status } : {} }),
   updateOrderStatus: (id, status) => axiosRequest.put(`/admin/orders/${id}/status`, null, { params: { status } }),
+  deleteInvalidOrders: () => axiosRequest.delete('/admin/orders/invalid'),
 
   getTables: () => axiosRequest.get('/admin/tables'),
-  getCustomerTables: () => axiosRequest.get('customer/tables'),
+  getCustomerTables: () => axiosRequest.get('/admin/customer/tables'),
   addTable: (data) => axiosRequest.post('/admin/tables', data),
   updateTable: (id, data) => axiosRequest.put(`/admin/tables/${id}`, data),
   deleteTable: (id) => axiosRequest.delete(`/admin/tables/${id}`),
@@ -169,7 +169,12 @@ export const merchantApi = {
   replyToReview: (id, replyContent) => axiosRequest.post(`/admin/reviews/${id}/reply`, { reply: replyContent }),
   deleteReview: (id) => axiosRequest.delete(`/admin/reviews/${id}`),
 
-  getStats: () => axiosRequest.get('/admin/stats')
+  getStats: () => axiosRequest.get('/admin/stats'),
+
+  getMessages: () => axiosRequest.get('/messages'),
+  getUnreadCount: () => axiosRequest.get('/messages/unread-count'),
+  markMessageRead: (id) => axiosRequest.put(`/messages/${id}/read`),
+  markAllMessagesRead: () => axiosRequest.put('/messages/read-all')
 }
 
 export const customerApi = {
@@ -181,6 +186,10 @@ export const customerApi = {
   toggleCollection: (dishesId) => axiosRequest.post('/collection/toggle', null, { params: { dishesId } }),
   getMyEvaluations: () => axiosRequest.get('/evaluations/my'),
   createEvaluation: (data) => axiosRequest.post('/evaluations', data),
+  getMessages: () => axiosRequest.get('/messages'),
+  getUnreadCount: () => axiosRequest.get('/messages/unread-count'),
+  markMessageRead: (id) => axiosRequest.put(`/messages/${id}/read`),
+  markAllMessagesRead: () => axiosRequest.put('/messages/read-all'),
   uploadFile: (formData) => axiosRequest.post('/common/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   })

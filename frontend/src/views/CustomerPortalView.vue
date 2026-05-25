@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PortalHeader from '../components/PortalHeader.vue'
 import { useNomNomApp } from '../utils/useNomNomApp'
@@ -33,10 +33,29 @@ const evalVisible = ref(false)
 const evaluatingOrder = ref(null)
 const evaluatingItem = ref(null)
 const evaluationForm = ref({ ratingValue: 5, content: '', imageUrls: [] })
+const orderMode = ref('all')
+const messageList = ref([])
+const unreadMessages = ref(0)
+const messagesVisible = ref(false)
+let messageTimer = null
 
 const cartCount = computed(() => cart.value.reduce((s, i) => s + i.quantity, 0))
 const cartTotal = computed(() => Number(cart.value.reduce((s, i) => s + i.price * i.quantity, 0).toFixed(2)))
 const selectedTable = computed(() => tableList.value.find(t => t.id === selectedTableId.value))
+const paidOrders = computed(() => orderList.value.filter(order => canEvaluateOrder(order.status)))
+const reviewableOrders = computed(() =>
+  paidOrders.value.filter(order => (order.items || []).some(item => !hasEvaluation(order.id, item.dishesId)))
+)
+const visibleOrderList = computed(() => {
+  if (orderMode.value === 'paid') return paidOrders.value
+  if (orderMode.value === 'reviewable') return reviewableOrders.value
+  return orderList.value
+})
+const orderEmptyText = computed(() => {
+  if (orderMode.value === 'paid') return '暂无已支付订单'
+  if (orderMode.value === 'reviewable') return '暂无可评价菜品'
+  return '暂无订单'
+})
 const filteredMenuItems = computed(() => {
   return localMenuItems.value.filter(item => {
     if (item.status !== 'AVAILABLE' && item.status !== 1) return false
@@ -57,6 +76,7 @@ async function doRecharge() {
     const res = await customerApi.rechargeWallet(num)
     wallet.value = Number(res.data?.data?.surplus || 0)
     rechargeVisible.value = false
+    await loadMessages()
     alert('充值成功！余额：￥' + wallet.value.toFixed(2))
   } catch (err) {
     alert(err?.response?.data?.message || '充值失败')
@@ -152,6 +172,27 @@ async function loadMyEvaluations() {
   }
 }
 
+async function loadMessages() {
+  try {
+    const [listRes, countRes] = await Promise.all([
+      customerApi.getMessages(),
+      customerApi.getUnreadCount()
+    ])
+    messageList.value = listRes.data?.data || []
+    unreadMessages.value = Number(countRes.data?.data || 0)
+  } catch {
+    messageList.value = []
+    unreadMessages.value = 0
+  }
+}
+
+async function markAllMessagesRead() {
+  try {
+    await customerApi.markAllMessagesRead()
+    await loadMessages()
+  } catch {}
+}
+
 function changeCategory(catId) {
   activeCategory.value = catId
   loadMenu()
@@ -237,6 +278,10 @@ function hasEvaluation(orderId, dishesId) {
   return myEvaluations.value.some(ev => Number(ev.ordersId) === Number(orderId) && Number(ev.dishesId) === Number(dishesId))
 }
 
+function canEvaluateOrder(status) {
+  return ['PAID', 'PREPARING', 'COMPLETED'].includes(status)
+}
+
 function openEvaluation(order, item) {
   evaluatingOrder.value = order
   evaluatingItem.value = item
@@ -270,9 +315,18 @@ async function submitEvaluation() {
     evalVisible.value = false
     await loadMyEvaluations()
     await loadOrders()
+    await loadMessages()
   } catch (err) {
     alert(err?.response?.data?.message || '评价失败')
   }
+}
+
+function messageTypeText(type) {
+  return {
+    2: '订单',
+    3: '钱包',
+    4: '评价'
+  }[type] || '通知'
 }
 
 async function exitPortal() {
@@ -289,6 +343,14 @@ onMounted(() => {
   loadOrders()
   loadCollections()
   loadMyEvaluations()
+  loadMessages()
+  messageTimer = window.setInterval(loadMessages, 30000)
+})
+
+onUnmounted(() => {
+  if (messageTimer) {
+    window.clearInterval(messageTimer)
+  }
 })
 </script>
 
@@ -310,8 +372,29 @@ onMounted(() => {
           {{ table.area || '大厅' }} · {{ table.number }}号桌 · {{ table.personNumber || 2 }}人
         </option>
       </select>
+      <button class="message-toggle" @click="messagesVisible = !messagesVisible">
+        消息<span v-if="unreadMessages > 0">{{ unreadMessages }}</span>
+      </button>
       <button class="recharge-btn" @click="openRechargeDialog">充值</button>
     </div>
+
+    <section v-if="messagesVisible" class="message-panel">
+      <div class="message-head">
+        <strong>消息提醒</strong>
+        <button :disabled="unreadMessages === 0" @click="markAllMessagesRead">全部已读</button>
+      </div>
+      <div v-if="messageList.length === 0" class="empty-hint">暂无消息</div>
+      <article
+        v-for="msg in messageList"
+        :key="msg.id"
+        class="message-line"
+        :class="{ unread: msg.readStatus === 0 }"
+      >
+        <span>{{ messageTypeText(msg.type) }}</span>
+        <p>{{ msg.content }}</p>
+        <small>{{ msg.createTime || '-' }}</small>
+      </article>
+    </section>
 
     <div class="main-layout">
       <aside class="category-sidebar">
@@ -350,10 +433,15 @@ onMounted(() => {
         <section class="order-history">
           <div class="history-title">
             <h3>我的订单</h3>
-            <button @click="loadOrders">刷新</button>
+            <div class="history-actions">
+              <button :class="{ active: orderMode === 'all' }" @click="orderMode = 'all'">全部</button>
+              <button :class="{ active: orderMode === 'paid' }" @click="orderMode = 'paid'">已支付订单</button>
+              <button :class="{ active: orderMode === 'reviewable' }" @click="orderMode = 'reviewable'">可评价</button>
+              <button @click="loadOrders">刷新</button>
+            </div>
           </div>
-          <div v-if="orderList.length === 0" class="empty-hint">暂无订单</div>
-          <article v-for="order in orderList" :key="order.id" class="history-card">
+          <div v-if="visibleOrderList.length === 0" class="empty-hint">{{ orderEmptyText }}</div>
+          <article v-for="order in visibleOrderList" :key="order.id" class="history-card">
             <div class="history-head">
               <span>{{ order.orderNo }}</span>
               <strong>{{ orderStatusText(order.status) }}</strong>
@@ -366,7 +454,7 @@ onMounted(() => {
               <div v-for="item in order.items || []" :key="item.id" class="history-item">
                 <span>{{ item.name }} x{{ item.quantity }}</span>
                 <button
-                  v-if="order.status === 'COMPLETED' && !hasEvaluation(order.id, item.dishesId)"
+                  v-if="canEvaluateOrder(order.status) && !hasEvaluation(order.id, item.dishesId)"
                   @click="openEvaluation(order, item)"
                 >
                   评价
@@ -456,9 +544,20 @@ onMounted(() => {
       <div class="modal">
         <h3>评价菜品</h3>
         <p class="eval-dish-name">{{ evaluatingItem?.name }}</p>
-        <select v-model.number="evaluationForm.ratingValue" class="eval-select">
-          <option v-for="n in 5" :key="n" :value="n">{{ n }} 星</option>
-        </select>
+        <div class="rating-picker" aria-label="评价星级">
+          <button
+            v-for="n in 5"
+            :key="n"
+            type="button"
+            class="star-button"
+            :class="{ active: n <= evaluationForm.ratingValue }"
+            :aria-label="`${n} 星`"
+            @click="evaluationForm.ratingValue = n"
+          >
+            ★
+          </button>
+          <span>{{ evaluationForm.ratingValue }} 星</span>
+        </div>
         <textarea v-model="evaluationForm.content" class="eval-textarea" placeholder="评价内容"></textarea>
         <input type="file" accept="image/*" @change="handleEvaluationImage" />
         <div class="eval-images">
@@ -532,6 +631,79 @@ onMounted(() => {
   padding: 6px 14px;
   border-radius: 4px;
   cursor: pointer;
+}
+.message-toggle {
+  border: 1px solid #d9e6ff;
+  background: #f5f9ff;
+  color: #1767c4;
+  padding: 6px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.message-toggle span {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  border-radius: 9px;
+  background: #ff4d4f;
+  color: #fff;
+  font-size: 11px;
+}
+.message-panel {
+  padding: 10px 20px;
+  background: #f8fbff;
+  border-bottom: 1px solid #e4eefb;
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.message-head,
+.message-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.message-head {
+  justify-content: space-between;
+}
+.message-head button,
+.history-actions button {
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.message-head button:disabled {
+  color: #aaa;
+  cursor: not-allowed;
+}
+.message-line {
+  background: #fff;
+  border: 1px solid #edf2f8;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.message-line.unread {
+  border-color: #8ab8ff;
+}
+.message-line span {
+  color: #1767c4;
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 36px;
+}
+.message-line p {
+  flex: 1;
+  margin: 0;
+  font-size: 13px;
+}
+.message-line small {
+  color: #888;
+  font-size: 11px;
 }
 .main-layout {
   display: flex;
@@ -664,7 +836,18 @@ onMounted(() => {
   margin: 0;
   font-size: 15px;
 }
-.history-title button,
+.history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.history-actions button.active {
+  background: #1890ff;
+  border-color: #1890ff;
+  color: #fff;
+}
+.history-title > button,
 .history-item button {
   border: 1px solid #ddd;
   background: #fff;
@@ -794,7 +977,6 @@ onMounted(() => {
   overflow-y: auto;
 }
 .modal input,
-.eval-select,
 .eval-textarea {
   width: 100%;
   box-sizing: border-box;
@@ -809,6 +991,32 @@ onMounted(() => {
 }
 .eval-dish-name {
   color: #666;
+}
+.rating-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 12px;
+}
+.star-button {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: #d0d0d0;
+  cursor: pointer;
+  font-size: 26px;
+  line-height: 1;
+  padding: 0;
+}
+.star-button.active,
+.star-button:hover {
+  color: #f5b301;
+}
+.rating-picker span {
+  margin-left: 4px;
+  color: #666;
+  font-size: 13px;
 }
 .eval-images {
   display: flex;

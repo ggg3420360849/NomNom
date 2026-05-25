@@ -36,6 +36,8 @@ import static java.math.BigDecimal.ZERO;
 public class OrderService {
 
     private static final DateTimeFormatter ORDER_CODE_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    private static final int ROLE_MERCHANT = 2;
+    private static final int MESSAGE_TYPE_ORDER = 2;
 
     private final OrderReadMapper orderReadMapper;
     private final PackageReadMapper packageReadMapper;
@@ -44,6 +46,7 @@ public class OrderService {
     private final DishesMapper dishesMapper;
     private final DishesTableMapper tableMapper;
     private final WalletService walletService;
+    private final MessagesService messagesService;
 
     public OrderService(
             OrderReadMapper orderReadMapper,
@@ -52,7 +55,8 @@ public class OrderService {
             OrdersItemMapper ordersItemMapper,
             DishesMapper dishesMapper,
             DishesTableMapper tableMapper,
-            WalletService walletService
+            WalletService walletService,
+            MessagesService messagesService
     ) {
         this.orderReadMapper = orderReadMapper;
         this.packageReadMapper = packageReadMapper;
@@ -61,6 +65,7 @@ public class OrderService {
         this.dishesMapper = dishesMapper;
         this.tableMapper = tableMapper;
         this.walletService = walletService;
+        this.messagesService = messagesService;
     }
 
     public List<OrderSummary> getCurrentOrders(Long userId) {
@@ -127,6 +132,12 @@ public class OrderService {
 
         deductStock(resolvedOrder.lines);
         updateTableAfterPayment(table, resolvedOrder.totalAmount);
+        messagesService.createMessage(request.getUserId(),
+                "订单 " + order.getCode() + " 已支付成功，可在我的订单中评价菜品。",
+                MESSAGE_TYPE_ORDER);
+        messagesService.createMessageForRole(ROLE_MERCHANT,
+                "收到新订单 " + order.getCode() + "，金额 ￥" + resolvedOrder.totalAmount,
+                MESSAGE_TYPE_ORDER);
 
         OrderSummary summary = new OrderSummary(order.getCode(), resolveCustomerName(request), "PAID",
                 resolvedOrder.totalAmount.doubleValue(), resolvedOrder.itemCount);

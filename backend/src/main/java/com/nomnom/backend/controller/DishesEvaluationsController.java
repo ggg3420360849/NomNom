@@ -44,7 +44,10 @@ public class DishesEvaluationsController {
     }
 
     @PutMapping("/{id}/reply")
-    public ApiResponse<Void> reply(@PathVariable Long id, @RequestParam String content) {
+    public ApiResponse<Void> reply(@PathVariable Long id, @RequestParam String content, HttpServletRequest request) {
+        if (!"MERCHANT".equals(request.getAttribute("roleCode"))) {
+            return ApiResponse.fail("当前账号无权回复评价");
+        }
         evaluationsService.replyByMerchant(id, content);
         return ApiResponse.ok("回复成功", null);
     }

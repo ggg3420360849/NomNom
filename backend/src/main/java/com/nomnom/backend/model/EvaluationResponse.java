@@ -7,9 +7,11 @@ public class EvaluationResponse {
     private Long id;
     private Long dishesId;
     private Long ordersId;
+    private String orderNo;
     private Long userId;
     private String userName;
     private String userAvatar;
+    private String dishName;
     private String content;
     private Integer ratingValue;
     private String replyContent;
@@ -27,6 +29,9 @@ public class EvaluationResponse {
     public Long getOrdersId() { return ordersId; }
     public void setOrdersId(Long ordersId) { this.ordersId = ordersId; }
 
+    public String getOrderNo() { return orderNo; }
+    public void setOrderNo(String orderNo) { this.orderNo = orderNo; }
+
     public Long getUserId() { return userId; }
     public void setUserId(Long userId) { this.userId = userId; }
 
@@ -35,6 +40,9 @@ public class EvaluationResponse {
 
     public String getUserAvatar() { return userAvatar; }
     public void setUserAvatar(String userAvatar) { this.userAvatar = userAvatar; }
+
+    public String getDishName() { return dishName; }
+    public void setDishName(String dishName) { this.dishName = dishName; }
 
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }

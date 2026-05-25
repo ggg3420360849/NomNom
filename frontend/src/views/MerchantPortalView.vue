@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import PortalHeader from '../components/PortalHeader.vue'
 import { useNomNomApp } from '../utils/useNomNomApp'
@@ -17,8 +17,8 @@ function switchTab(tab) {
   localStorage.setItem('adminTab', tab)
   if (tab === 'B01') subTab.value = 'list'
   if (tab === 'B02') subTab.value = 'layout'
-  if (tab === 'B03') { b03SubTab.value = 'orders'; fetchOrders(); }
-  if (tab === 'B04') { subTab.value = 'reviews'; fetchReviews(); }
+  if (tab === 'B03') { b03SubTab.value = 'orders'; fetchOrders(); fetchAudits(); fetchReconciliation(); }
+  if (tab === 'B04') { subTab.value = 'reviews'; fetchReviews(); fetchStats(); }
 }
 
 const toast = ref('')
@@ -200,16 +200,100 @@ const handleTableClick = async (table) => {
 };
 
 const orderList = ref([]); const auditList = ref([]); const reconciliationList = ref([]); const reviewList = ref([]); const statsList = ref([]);
+const messageList = ref([]); const unreadMessages = ref(0); const messagesVisible = ref(false);
+let messageTimer = null;
 const orderStatusFilter = ref(null); const ORDER_STATUS = { 1: '待支付', 2: '已支付', 3: '制作中', 4: '已完成', 5: '已取消' };
 
 async function fetchOrders() { try { const res = await merchantApi.getOrders(orderStatusFilter.value); orderList.value = res.data?.data || res.data || [] } catch { } }
 async function fetchAudits() { try { const res = await merchantApi.getAudits(); auditList.value = res.data?.data || [] } catch { } }
-async function fetchReconciliation() { try { const res = await merchantApi.getFinanceReconciliation(); reconciliationList.value = res.data?.data || [] } catch { } }
-async function fetchReviews() { try { const res = await merchantApi.getReviews(); reviewList.value = res.data?.data || [] } catch { } }
-async function fetchStats() { try { const res = await merchantApi.getStats(); statsList.value = res.data?.data || [] } catch { } }
+async function fetchReconciliation() {
+  try {
+    const res = await merchantApi.getFinanceReconciliation()
+    reconciliationList.value = (res.data?.data || []).map(item => ({
+      ...item,
+      orderAmt: Number(item.orderAmt || 0),
+      flowAmt: Number(item.flowAmt || 0),
+    }))
+  } catch { }
+}
+async function fetchReviews() {
+  try {
+    const res = await merchantApi.getReviews()
+    reviewList.value = (res.data?.data || []).map(item => ({
+      ...item,
+      user: item.userName || '顾客',
+      rating: item.ratingValue || 0,
+      reply: item.replyContent || '',
+    }))
+  } catch { }
+}
+async function fetchStats() {
+  try {
+    const res = await merchantApi.getStats()
+    statsList.value = (res.data?.data || []).map(item => ({
+      ...item,
+      sales: Number(item.sales || 0),
+      revenue: Number(item.revenue || 0),
+    }))
+  } catch { }
+}
+async function loadMessages() {
+  try {
+    const [listRes, countRes] = await Promise.all([
+      merchantApi.getMessages(),
+      merchantApi.getUnreadCount()
+    ])
+    messageList.value = listRes.data?.data || []
+    unreadMessages.value = Number(countRes.data?.data || 0)
+  } catch {
+    messageList.value = []
+    unreadMessages.value = 0
+  }
+}
+async function markAllMessagesRead() { try { await merchantApi.markAllMessagesRead(); await loadMessages() } catch {} }
+function messageTypeText(type) { return ({ 2: '订单', 3: '钱包', 4: '评价' }[type] || '通知') }
+function auditTypeText(type) { return ({ CHARGE: '钱包充值', REFUND: '订单退款' }[type] || '业务申请') }
+function auditStatusText(status) { return ({ PENDING: '待审核', APPROVED: '已通过', REJECTED: '已驳回', COMPLETED: '已完成', NONE: '无退款' }[status] || status || '-') }
+function reconcileResultText(rec) { return rec.result || (Number(rec.orderAmt || 0) === Number(rec.flowAmt || 0) ? '平账' : '异常') }
 
-async function changeOrderStatus(order, nextStatus) { try { await merchantApi.updateOrderStatus(order.id, nextStatus); await fetchOrders(); } catch {} }
-async function handleAuditAction(id, isPass) { try { await merchantApi.auditRegistrationOrRefund(id, isPass); showToast(isPass ? '审批已通过' : '申请已驳回'); await fetchAudits() } catch {} }
+function switchB03SubTab(tab) {
+  b03SubTab.value = tab
+  if (tab === 'orders') fetchOrders()
+  if (tab === 'audits') fetchAudits()
+  if (tab === 'reconciliation') fetchReconciliation()
+}
+function switchB04SubTab(tab) {
+  subTab.value = tab
+  if (tab === 'reviews') fetchReviews()
+  if (tab === 'stats') fetchStats()
+}
+
+async function changeOrderStatus(order, nextStatus) {
+  if (!nextStatus) return
+  try { await merchantApi.updateOrderStatus(order.id, nextStatus); await fetchOrders(); await loadMessages(); showToast('订单状态已更新') } catch (err) { showToast(getErrorMessage(err, '状态更新失败')) }
+}
+async function cleanupInvalidOrders() {
+  if (!window.confirm('确认清理空金额、无用户、无明细等异常订单吗？')) return
+  try {
+    const res = await merchantApi.deleteInvalidOrders()
+    const data = res.data?.data || {}
+    showToast(`已清理 ${data.deletedOrders || 0} 个异常订单`)
+    await fetchOrders()
+  } catch (err) {
+    showToast(getErrorMessage(err, '清理失败'))
+  }
+}
+async function handleAuditAction(id, isPass) {
+  try {
+    await merchantApi.auditRegistrationOrRefund(id, isPass)
+    showToast(isPass ? '审批已通过' : '申请已驳回')
+    await fetchAudits()
+    await fetchReconciliation()
+    await loadMessages()
+  } catch (err) {
+    showToast(getErrorMessage(err, '审批失败'))
+  }
+}
 
 const tableForm = reactive({ number: '', personNumber: 2, area: '大厅', minSpend: 0 })
 const showTableForm = ref(false); const editingTableId = ref(null);
@@ -222,15 +306,20 @@ const activeReview = ref(null); const inputReplyText = ref(''); const showReplyM
 function openReplyDialog(review) { activeReview.value = review; inputReplyText.value = review.reply || ''; showReplyModal.value = true }
 async function submitReviewReply() {
   if (!inputReplyText.value.trim()) return showToast('回复不可为空')
-  try { await merchantApi.replyToReview(activeReview.value.id, inputReplyText.value.trim()); showToast('回复成功'); showReplyModal.value = false; await fetchReviews(); } catch {}
+  try { await merchantApi.replyToReview(activeReview.value.id, inputReplyText.value.trim()); showToast('回复成功'); showReplyModal.value = false; await fetchReviews(); await loadMessages(); } catch {}
 }
-async function deleteReviewItem(id) { try { await merchantApi.deleteReview(id); showToast('评价已删除'); await fetchReviews(); } catch {} }
+async function deleteReviewItem(id) { try { await merchantApi.deleteReview(id); showToast('评价已删除'); await fetchReviews(); await loadMessages(); } catch {} }
 
 async function exitPortal() { app.logout(); await router.push('/login'); }
 
 onMounted(() => {
   app.loadPortalData(); fetchTables(); fetchDishes(); fetchCategories();
-  fetchAudits(); fetchReconciliation(); fetchReviews(); fetchStats();
+  fetchAudits(); fetchReconciliation(); fetchReviews(); fetchStats(); loadMessages();
+  messageTimer = window.setInterval(loadMessages, 30000);
+})
+
+onUnmounted(() => {
+  if (messageTimer) window.clearInterval(messageTimer);
 })
 </script>
 
@@ -254,6 +343,27 @@ onMounted(() => {
 
     <main class="content-wrapper">
       <PortalHeader title="商家工作台" :display-name="app.displayName.value" role-label="店长" @logout="exitPortal" />
+
+      <section class="merchant-message-bar">
+        <button class="msg-pill" @click="messagesVisible = !messagesVisible">
+          消息提醒<span v-if="unreadMessages > 0">{{ unreadMessages }}</span>
+        </button>
+        <button class="btn-link" :disabled="unreadMessages === 0" @click="markAllMessagesRead">全部已读</button>
+      </section>
+
+      <section v-if="messagesVisible" class="merchant-message-panel">
+        <div v-if="messageList.length === 0" class="empty-hint">暂无消息</div>
+        <article
+          v-for="msg in messageList"
+          :key="msg.id"
+          class="merchant-message-item"
+          :class="{ unread: msg.readStatus === 0 }"
+        >
+          <strong>{{ messageTypeText(msg.type) }}</strong>
+          <span>{{ msg.content }}</span>
+          <small>{{ msg.createTime || '-' }}</small>
+        </article>
+      </section>
 
       <div v-if="toast" class="toast-bar">{{ toast }}</div>
       <div class="page-container">
@@ -395,12 +505,15 @@ onMounted(() => {
         <div v-if="currentMenu === 'B03'" class="module-box">
           <div class="tab-header">
             <div class="tab-triggers">
-              <span :class="{ active: b03SubTab === 'orders' }" @click="b03SubTab = 'orders'">流水及业务流转</span>
-              <span :class="{ active: b03SubTab === 'audits' }" @click="b03SubTab = 'audits'">充值/退款审核</span>
-              <span :class="{ active: b03SubTab === 'reconciliation' }" @click="b03SubTab = 'reconciliation'">系统自动核账</span>
+              <span :class="{ active: b03SubTab === 'orders' }" @click="switchB03SubTab('orders')">流水及业务流转</span>
+              <span :class="{ active: b03SubTab === 'audits' }" @click="switchB03SubTab('audits')">充值/退款审核</span>
+              <span :class="{ active: b03SubTab === 'reconciliation' }" @click="switchB03SubTab('reconciliation')">系统自动核账</span>
             </div>
           </div>
           <div v-if="b03SubTab === 'orders'">
+            <div class="table-actions">
+              <button class="btn-cancel" @click="cleanupInvalidOrders">清理异常订单</button>
+            </div>
             <table class="biz-table">
               <thead><tr><th>订单编号</th><th>桌台</th><th>金额</th><th>状态</th><th>订单时间</th><th>操作</th></tr></thead>
               <tbody>
@@ -420,12 +533,13 @@ onMounted(() => {
               <thead><tr><th>事项编号</th><th>类别</th><th>申请详情</th><th>当前进度</th><th>裁决</th></tr></thead>
               <tbody>
               <tr v-if="auditList.length===0"><td colspan="5" style="text-align:center; color:#999;">暂无审核</td></tr>
-              <tr v-for="audit in auditList" :key="audit.id"><td>#{{ audit.id }}</td><td>{{ audit.type==='CHARGE'?'钱包充值':'订单退款' }}</td><td>{{ audit.desc }}</td><td>{{ audit.status }}</td>
+              <tr v-for="audit in auditList" :key="audit.id"><td>#{{ audit.id }}</td><td>{{ auditTypeText(audit.type) }}</td><td>{{ audit.desc }}</td><td>{{ auditStatusText(audit.status) }}</td>
                 <td>
                   <div v-if="audit.status==='PENDING'" style="display:flex; gap:6px;">
                     <button class="btn-primary" @click="handleAuditAction(audit.id, true)" style="padding:4px 10px; font-size:12px;">通过</button>
                     <button class="btn-cancel" @click="handleAuditAction(audit.id, false)" style="padding:4px 10px; font-size:12px;">驳回</button>
                   </div>
+                  <span v-else style="color:#999;font-size:12px;">无需处理</span>
                 </td>
               </tr>
               </tbody>
@@ -436,7 +550,7 @@ onMounted(() => {
               <thead><tr><th>审计凭证号</th><th>应用端消费</th><th>底层流水</th><th>结果</th></tr></thead>
               <tbody>
               <tr v-if="reconciliationList.length===0"><td colspan="4" style="text-align:center; color:#999;">暂无对账</td></tr>
-              <tr v-for="rec in reconciliationList" :key="rec.id"><td>{{ rec.id }}</td><td>￥{{ rec.orderAmt.toFixed(2) }}</td><td>￥{{ rec.flowAmt.toFixed(2) }}</td><td>平账</td></tr>
+              <tr v-for="rec in reconciliationList" :key="rec.id"><td>{{ rec.orderNo || rec.id }}</td><td>￥{{ Number(rec.orderAmt || 0).toFixed(2) }}</td><td>￥{{ Number(rec.flowAmt || 0).toFixed(2) }}</td><td>{{ reconcileResultText(rec) }}</td></tr>
               </tbody>
             </table>
           </div>
@@ -444,15 +558,15 @@ onMounted(() => {
 
         <div v-if="currentMenu === 'B04'" class="module-box">
           <div class="tab-header">
-            <div class="tab-triggers"><span :class="{ active: subTab === 'reviews' }" @click="subTab = 'reviews'">客评交互管理</span><span :class="{ active: subTab === 'stats' }" @click="subTab = 'stats'">决策分析统计</span></div>
+            <div class="tab-triggers"><span :class="{ active: subTab === 'reviews' }" @click="switchB04SubTab('reviews')">客评交互管理</span><span :class="{ active: subTab === 'stats' }" @click="switchB04SubTab('stats')">决策分析统计</span></div>
           </div>
           <div v-if="subTab === 'reviews'">
             <table class="biz-table">
               <thead><tr><th>消费者</th><th>受评菜品</th><th>评分</th><th>评语内容</th><th>操作</th></tr></thead>
               <tbody>
               <tr v-if="reviewList.length===0"><td colspan="5" style="text-align:center; color:#999;">暂无评价</td></tr>
-              <tr v-for="r in reviewList" :key="r.id"><td>{{ r.user }}</td><td>{{ r.dishName }}</td><td style="color: #f57c00;">{{ '★'.repeat(r.rating) }}</td>
-                <td>{{ r.content }} <p v-if="r.reply" style="color:#f57c00; font-size:12px;">↩ 回函：{{ r.reply }}</p></td>
+              <tr v-for="r in reviewList" :key="r.id"><td>{{ r.user }}</td><td>{{ r.dishName || '-' }}</td><td style="color: #f57c00;">{{ '★'.repeat(r.rating) }}</td>
+                <td>{{ r.content }} <p v-if="r.reply" style="color:#f57c00; font-size:12px;">↩ 回复：{{ r.reply }}</p><small v-if="r.orderNo" style="color:#999;">订单：{{ r.orderNo }}</small></td>
                 <td><button class="btn-link" @click="openReplyDialog(r)">回复</button><button class="btn-link danger" @click="deleteReviewItem(r.id)">删除</button></td>
               </tr>
               </tbody>
@@ -463,7 +577,7 @@ onMounted(() => {
               <thead><tr><th>名次</th><th>菜品名称</th><th>累积销量</th><th>账面营收</th></tr></thead>
               <tbody>
               <tr v-if="statsList.length===0"><td colspan="4" style="text-align:center; color:#999;">暂无统计数据</td></tr>
-              <tr v-for="s in statsList" :key="s.rank"><td>{{ s.rank }}</td><td>{{ s.name }}</td><td>{{ s.sales }}</td><td class="sell-price">￥{{ s.revenue.toFixed(2) }}</td></tr>
+              <tr v-for="s in statsList" :key="s.rank"><td>{{ s.rank }}</td><td>{{ s.name }}</td><td>{{ s.sales }}</td><td class="sell-price">￥{{ Number(s.revenue || 0).toFixed(2) }}</td></tr>
               </tbody>
             </table>
           </div>
@@ -557,6 +671,64 @@ onMounted(() => {
 .nav-item.active { background: #f57c00; color: white; box-shadow: 0 4px 10px rgba(245, 124, 0, 0.2);}
 .toast-bar { background: #323232; color: #fff; padding: 10px 24px; text-align: center; font-size: 14px; position: fixed; top: 10px; left: 50%; transform: translateX(-50%); border-radius: 8px; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
 .content-wrapper { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.merchant-message-bar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 24px;
+  background: #fffdf9;
+  border-bottom: 1px solid #f0e6d2;
+}
+.msg-pill {
+  border: 1px solid #f57c00;
+  background: #fff8eb;
+  color: #d84315;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.msg-pill span {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  border-radius: 9px;
+  background: #d32f2f;
+  color: #fff;
+  font-size: 11px;
+}
+.merchant-message-panel {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 10px 24px;
+  background: #fffaf2;
+  border-bottom: 1px solid #f0e6d2;
+}
+.merchant-message-item {
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid #f0e6d2;
+  border-radius: 6px;
+  background: white;
+  font-size: 13px;
+}
+.merchant-message-item.unread {
+  border-color: #f57c00;
+}
+.merchant-message-item strong {
+  color: #d84315;
+}
+.merchant-message-item small {
+  color: #8d6e63;
+}
 .page-container { padding: 24px; overflow-y: auto; flex: 1; }
 .module-box { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 16px rgba(121, 85, 72, 0.04); border: 1px solid #f8f4ec;}
 .tab-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f0e6d2; margin-bottom: 20px; }
@@ -565,6 +737,7 @@ onMounted(() => {
 .tab-triggers span.active { color: #f57c00; }
 .tab-triggers span.active::after { content: ''; position: absolute; bottom: -1px; left: 0; width: 100%; height: 2px; background: #f57c00; }
 .table-tool-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.table-actions { display: flex; justify-content: flex-end; margin-bottom: 12px; }
 .area-filters { display: flex; gap: 8px; }
 .area-filters button { border: 1px solid #e0d4c3; padding: 5px 16px; border-radius: 6px; background: white; color:#5d4037; cursor: pointer; transition: 0.2s;}
 .area-filters button.active { background: #f57c00; color: white; border-color: #f57c00; box-shadow: 0 2px 6px rgba(245, 124, 0, 0.2);}
