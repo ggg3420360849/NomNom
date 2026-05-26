@@ -193,6 +193,15 @@ async function markAllMessagesRead() {
   } catch {}
 }
 
+async function markMessageRead(message) {
+  if (!message?.id || message.readStatus !== 0) return
+  try {
+    await customerApi.markMessageRead(message.id)
+    message.readStatus = 1
+    unreadMessages.value = Math.max(0, unreadMessages.value - 1)
+  } catch {}
+}
+
 function changeCategory(catId) {
   activeCategory.value = catId
   loadMenu()
@@ -393,6 +402,14 @@ onUnmounted(() => {
         <span>{{ messageTypeText(msg.type) }}</span>
         <p>{{ msg.content }}</p>
         <small>{{ msg.createTime || '-' }}</small>
+        <button
+          v-if="msg.readStatus === 0"
+          class="message-read-btn"
+          type="button"
+          @click="markMessageRead(msg)"
+        >
+          设为已读
+        </button>
       </article>
     </section>
 
@@ -704,6 +721,19 @@ onUnmounted(() => {
 .message-line small {
   color: #888;
   font-size: 11px;
+}
+.message-read-btn {
+  border: 1px solid #8ab8ff;
+  background: #f5f9ff;
+  color: #1767c4;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.message-read-btn:hover {
+  background: #eaf3ff;
 }
 .main-layout {
   display: flex;

@@ -251,6 +251,14 @@ async function loadMessages() {
   }
 }
 async function markAllMessagesRead() { try { await merchantApi.markAllMessagesRead(); await loadMessages() } catch {} }
+async function markMessageRead(message) {
+  if (!message?.id || message.readStatus !== 0) return
+  try {
+    await merchantApi.markMessageRead(message.id)
+    message.readStatus = 1
+    unreadMessages.value = Math.max(0, unreadMessages.value - 1)
+  } catch {}
+}
 function messageTypeText(type) { return ({ 2: '订单', 3: '钱包', 4: '评价' }[type] || '通知') }
 function auditTypeText(type) { return ({ CHARGE: '钱包充值', REFUND: '订单退款' }[type] || '业务申请') }
 function auditStatusText(status) { return ({ PENDING: '待审核', APPROVED: '已通过', REJECTED: '已驳回', COMPLETED: '已完成', NONE: '无退款' }[status] || status || '-') }
@@ -362,6 +370,14 @@ onUnmounted(() => {
           <strong>{{ messageTypeText(msg.type) }}</strong>
           <span>{{ msg.content }}</span>
           <small>{{ msg.createTime || '-' }}</small>
+          <button
+            v-if="msg.readStatus === 0"
+            class="message-read-btn"
+            type="button"
+            @click="markMessageRead(msg)"
+          >
+            设为已读
+          </button>
         </article>
       </section>
 
@@ -711,7 +727,7 @@ onUnmounted(() => {
 }
 .merchant-message-item {
   display: grid;
-  grid-template-columns: 48px 1fr auto;
+  grid-template-columns: 48px 1fr auto auto;
   gap: 10px;
   align-items: center;
   padding: 8px 10px;
@@ -728,6 +744,19 @@ onUnmounted(() => {
 }
 .merchant-message-item small {
   color: #8d6e63;
+}
+.message-read-btn {
+  border: 1px solid #f57c00;
+  background: #fff8eb;
+  color: #d84315;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.message-read-btn:hover {
+  background: #fff1dc;
 }
 .page-container { padding: 24px; overflow-y: auto; flex: 1; }
 .module-box { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 16px rgba(121, 85, 72, 0.04); border: 1px solid #f8f4ec;}

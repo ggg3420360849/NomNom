@@ -1,6 +1,7 @@
 package com.nomnom.backend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.nomnom.backend.entity.MessagesEntity;
 import com.nomnom.backend.entity.UserEntity;
 import com.nomnom.backend.mapper.MessagesMapper;
@@ -37,24 +38,30 @@ public class MessagesService {
     }
 
     @Transactional
-    public void markAsRead(Long id) {
-        MessagesEntity entity = messagesMapper.selectById(id);
-        if (entity != null) {
-            entity.setReadStatus(1);
-            messagesMapper.updateById(entity);
+    public void markAsRead(Long userId, Long id) {
+        if (userId == null || id == null) {
+            return;
         }
+        MessagesEntity entity = new MessagesEntity();
+        entity.setReadStatus(1);
+        messagesMapper.update(entity,
+                new LambdaUpdateWrapper<MessagesEntity>()
+                        .eq(MessagesEntity::getId, id.intValue())
+                        .eq(MessagesEntity::getUserId, userId.intValue())
+                        .eq(MessagesEntity::getReadStatus, 0));
     }
 
     @Transactional
     public void markAllAsRead(Long userId) {
-        List<MessagesEntity> list = messagesMapper.selectList(
-                new LambdaQueryWrapper<MessagesEntity>()
+        if (userId == null) {
+            return;
+        }
+        MessagesEntity entity = new MessagesEntity();
+        entity.setReadStatus(1);
+        messagesMapper.update(entity,
+                new LambdaUpdateWrapper<MessagesEntity>()
                         .eq(MessagesEntity::getUserId, userId.intValue())
                         .eq(MessagesEntity::getReadStatus, 0));
-        for (MessagesEntity entity : list) {
-            entity.setReadStatus(1);
-            messagesMapper.updateById(entity);
-        }
     }
 
     @Transactional

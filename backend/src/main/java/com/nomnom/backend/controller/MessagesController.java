@@ -31,8 +31,9 @@ public class MessagesController {
     }
 
     @PutMapping("/{id}/read")
-    public ApiResponse<Void> markRead(@PathVariable Long id) {
-        messagesService.markAsRead(id);
+    public ApiResponse<Void> markRead(@PathVariable Long id, HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute("userId");
+        messagesService.markAsRead(userId, id);
         return ApiResponse.ok("ok", null);
     }
 
