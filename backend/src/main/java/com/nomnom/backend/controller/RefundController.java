@@ -25,13 +25,15 @@ public class RefundController {
         if (userId == null) {
             return ApiResponse.fail("请先登录");
         }
-        refundService.submitRefund(request.getOrdersId(), request.getRefundCause());
-        return ApiResponse.ok("退款申请已提交", null);
+        refundService.submitRefund(userId, request.getOrdersId(), request.getRefundCause(), request.getRequestType());
+        return ApiResponse.ok("申请已提交，等待商家审核", null);
     }
 
     @GetMapping("/order/{ordersId}")
-    public ApiResponse<OrdersRefundReplyEntity> getByOrder(@PathVariable Long ordersId) {
-        return ApiResponse.ok(refundService.getByOrder(ordersId));
+    public ApiResponse<OrdersRefundReplyEntity> getByOrder(@PathVariable Long ordersId, HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute("userId");
+        String roleCode = (String) request.getAttribute("roleCode");
+        return ApiResponse.ok(refundService.getByOrder(userId, roleCode, ordersId));
     }
 
     @GetMapping

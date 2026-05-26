@@ -20,6 +20,7 @@ const detailEvaluations = ref([])
 const orderReceiptVisible = ref(false)
 const orderInfo = ref({})
 const categoryList = ref([])
+const activeView = ref('menu')
 const activeCategory = ref(null)
 const localMenuItems = ref([])
 const keyword = ref('')
@@ -27,12 +28,17 @@ const tableList = ref([])
 const selectedTableId = ref(null)
 const cart = ref([])
 const orderList = ref([])
+const collectionList = ref([])
 const favoriteIds = ref(new Set())
 const myEvaluations = ref([])
 const evalVisible = ref(false)
 const evaluatingOrder = ref(null)
 const evaluatingItem = ref(null)
 const evaluationForm = ref({ ratingValue: 5, content: '', imageUrls: [] })
+const orderRequestVisible = ref(false)
+const orderRequestType = ref('CANCEL')
+const orderRequestTarget = ref(null)
+const orderRequestReason = ref('')
 const orderMode = ref('all')
 const messageList = ref([])
 const unreadMessages = ref(0)
@@ -42,9 +48,11 @@ let messageTimer = null
 const cartCount = computed(() => cart.value.reduce((s, i) => s + i.quantity, 0))
 const cartTotal = computed(() => Number(cart.value.reduce((s, i) => s + i.price * i.quantity, 0).toFixed(2)))
 const selectedTable = computed(() => tableList.value.find(t => t.id === selectedTableId.value))
-const paidOrders = computed(() => orderList.value.filter(order => canEvaluateOrder(order.status)))
+const showCart = computed(() => activeView.value !== 'orders' && cart.value.length > 0)
+const paidOrders = computed(() => orderList.value.filter(order => isPaidOrder(order.status)))
+const completedOrders = computed(() => orderList.value.filter(order => canEvaluateOrder(order.status)))
 const reviewableOrders = computed(() =>
-  paidOrders.value.filter(order => (order.items || []).some(item => !hasEvaluation(order.id, item.dishesId)))
+  completedOrders.value.filter(order => (order.items || []).some(item => !hasEvaluation(order.id, item.dishesId)))
 )
 const visibleOrderList = computed(() => {
   if (orderMode.value === 'paid') return paidOrders.value
@@ -61,6 +69,30 @@ const filteredMenuItems = computed(() => {
     if (item.status !== 'AVAILABLE' && item.status !== 1) return false
     const text = `${item.name || ''} ${item.detail || ''} ${item.description || ''}`
     return keyword.value ? text.includes(keyword.value) : true
+  })
+})
+const favoriteItems = computed(() => {
+  const menuByDishId = new Map(localMenuItems.value.map(item => [Number(item.dishesId || item.id), item]))
+
+  return collectionList.value.map(collection => {
+    const dishesId = Number(collection.dishesId)
+    const menuItem = menuByDishId.get(dishesId)
+    const packageId = Number(collection.packageId || menuItem?.id || 0)
+    const status = menuItem?.status || collection.dishStatus
+    const available = Boolean(packageId) && (status === 'AVAILABLE' || status === 1)
+
+    return {
+      ...(menuItem || {}),
+      id: packageId || dishesId,
+      dishesId,
+      name: menuItem?.name || collection.dishName || '未知菜品',
+      coverUrl: menuItem?.coverUrl || collection.dishCover,
+      price: Number(collection.price ?? menuItem?.price ?? 0),
+      status,
+      monthlySales: menuItem?.monthlySales || 0,
+      description: menuItem?.description || '',
+      available
+    }
   })
 })
 
@@ -129,10 +161,13 @@ async function loadMenu() {
 
 async function loadTables() {
   try {
-    tableList.value = await fetchAvailableTables()
-    if (!selectedTableId.value && tableList.value.length > 0) selectedTableId.value = tableList.value[0].id
+    tableList.value = (await fetchAvailableTables()).filter(table => Number(table.status ?? 0) === 0)
+    if (!tableList.value.some(table => Number(table.id) === Number(selectedTableId.value))) {
+      selectedTableId.value = tableList.value.length > 0 ? tableList.value[0].id : null
+    }
   } catch {
     tableList.value = []
+    selectedTableId.value = null
   }
 }
 
@@ -157,8 +192,10 @@ async function loadOrders() {
 async function loadCollections() {
   try {
     const res = await customerApi.getCollections()
-    favoriteIds.value = new Set((res.data?.data || []).map(item => Number(item.dishesId)))
+    collectionList.value = res.data?.data || []
+    favoriteIds.value = new Set(collectionList.value.map(item => Number(item.dishesId)))
   } catch {
+    collectionList.value = []
     favoriteIds.value = new Set()
   }
 }
@@ -203,11 +240,24 @@ async function markMessageRead(message) {
 }
 
 function changeCategory(catId) {
+  activeView.value = 'menu'
   activeCategory.value = catId
   loadMenu()
 }
 
+function showFavorites() {
+  activeView.value = 'favorites'
+  loadCollections()
+}
+
+function showOrders() {
+  activeView.value = 'orders'
+  loadOrders()
+  loadMyEvaluations()
+}
+
 function addToCart(item) {
+  if (item.available === false) return
   const found = cart.value.find(i => i.id === item.id)
   if (found) found.quantity++
   else cart.value.push({ ...item, price: Number(item.price || 0), quantity: 1 })
@@ -261,13 +311,18 @@ function isFavorited(item) {
 }
 
 async function toggleFavorite(item) {
-  const dishesId = item.dishesId || item.id
+  const dishesId = Number(item.dishesId || item.id)
+  if (!dishesId) return
   try {
     const res = await customerApi.toggleCollection(dishesId)
     const next = new Set(favoriteIds.value)
-    if (res.data?.data) next.add(Number(dishesId))
-    else next.delete(Number(dishesId))
+    if (res.data?.data) {
+      next.add(dishesId)
+    } else {
+      next.delete(dishesId)
+    }
     favoriteIds.value = next
+    await loadCollections()
   } catch (err) {
     alert(err?.response?.data?.message || '收藏操作失败')
   }
@@ -288,7 +343,57 @@ function hasEvaluation(orderId, dishesId) {
 }
 
 function canEvaluateOrder(status) {
+  return status === 'COMPLETED'
+}
+
+function isPaidOrder(status) {
   return ['PAID', 'PREPARING', 'COMPLETED'].includes(status)
+}
+
+function canCancelOrder(order) {
+  return ['PAID', 'PREPARING'].includes(order.status) && !order.refundStatus
+}
+
+function canRequestRefund(order) {
+  return order.status === 'COMPLETED' && !order.refundStatus
+}
+
+function refundStatusText(status) {
+  return {
+    2: '审核中',
+    3: '已退款',
+    4: '已驳回'
+  }[Number(status)] || ''
+}
+
+function refundCauseText(cause) {
+  return (cause || '').replace(/^取消订单：/, '').replace(/^退款：/, '')
+}
+
+function openOrderRequest(order, type) {
+  orderRequestTarget.value = order
+  orderRequestType.value = type
+  orderRequestReason.value = ''
+  orderRequestVisible.value = true
+}
+
+async function submitOrderRequest() {
+  const reason = orderRequestReason.value.trim()
+  if (!reason) return alert('请填写原因')
+  try {
+    await customerApi.submitRefund({
+      ordersId: orderRequestTarget.value.id,
+      requestType: orderRequestType.value,
+      refundCause: reason
+    })
+    orderRequestVisible.value = false
+    await loadOrders()
+    await loadWallet()
+    await loadMessages()
+    alert('申请已提交，等待商家审核')
+  } catch (err) {
+    alert(err?.response?.data?.message || '申请提交失败')
+  }
 }
 
 function openEvaluation(order, item) {
@@ -415,39 +520,107 @@ onUnmounted(() => {
 
     <div class="main-layout">
       <aside class="category-sidebar">
-        <button class="category-btn" :class="{ active: activeCategory === null }" @click="changeCategory(null)">
-          全部
+        <button
+          class="category-btn favorite-category-btn"
+          :class="{ active: activeView === 'favorites' }"
+          type="button"
+          @click="showFavorites"
+        >
+          <span>♥</span>
+          我的收藏
+        </button>
+        <button class="category-btn" :class="{ active: activeView === 'menu' && activeCategory === null }" @click="changeCategory(null)">
+          全部菜品
         </button>
         <button
           v-for="cat in categoryList"
           :key="cat.code"
           class="category-btn"
-          :class="{ active: activeCategory === cat.code }"
+          :class="{ active: activeView === 'menu' && activeCategory === cat.code }"
           @click="changeCategory(cat.code)"
         >
           {{ cat.name }}
         </button>
+        <button
+          class="category-btn order-category-btn"
+          :class="{ active: activeView === 'orders' }"
+          type="button"
+          @click="showOrders"
+        >
+          我的订单
+        </button>
       </aside>
 
       <section class="menu-area">
-        <div class="search-box">
-          <input v-model.lazy="keyword" class="search-input" type="text" placeholder="搜索菜品或套餐" />
-        </div>
+        <template v-if="activeView === 'menu'">
+          <div class="search-box">
+            <input v-model.lazy="keyword" class="search-input" type="text" placeholder="搜索菜品或套餐" />
+          </div>
 
-        <div class="menu-list">
-          <article v-for="item in filteredMenuItems" :key="item.id" class="menu-card" @click="openDetail(item)">
-            <button class="fav-btn" :class="{ active: isFavorited(item) }" @click.stop="toggleFavorite(item)">
-              {{ isFavorited(item) ? '已藏' : '收藏' }}
-            </button>
-            <img :src="item.coverUrl || '/placeholder.png'" class="menu-image" />
-            <h3 class="menu-title">{{ item.name }}</h3>
-            <p class="menu-sales">月售 {{ item.monthlySales || 0 }}</p>
-            <p class="menu-price">￥{{ Number(item.price || 0).toFixed(2) }}</p>
-            <button class="add-btn" @click.stop="addToCart(item)">+</button>
-          </article>
-        </div>
+          <div class="menu-list">
+            <article v-for="item in filteredMenuItems" :key="item.id" class="menu-card" @click="openDetail(item)">
+              <button
+                class="fav-btn"
+                :class="{ active: isFavorited(item) }"
+                type="button"
+                :title="isFavorited(item) ? '取消收藏' : '收藏菜品'"
+                :aria-label="isFavorited(item) ? '取消收藏' : '收藏菜品'"
+                @click.stop="toggleFavorite(item)"
+              >
+                {{ isFavorited(item) ? '♥' : '♡' }}
+              </button>
+              <img :src="item.coverUrl || '/placeholder.png'" class="menu-image" />
+              <h3 class="menu-title">{{ item.name }}</h3>
+              <p class="menu-sales">月售 {{ item.monthlySales || 0 }}</p>
+              <p class="menu-price">￥{{ Number(item.price || 0).toFixed(2) }}</p>
+              <button class="add-btn" @click.stop="addToCart(item)">+</button>
+            </article>
+          </div>
+        </template>
 
-        <section class="order-history">
+        <section v-else-if="activeView === 'favorites'" class="favorites-panel single-view-panel">
+          <div class="favorites-head">
+            <h3>我的收藏</h3>
+          </div>
+          <div v-if="favoriteItems.length === 0" class="empty-hint">暂无收藏菜品</div>
+          <div v-else class="favorite-list">
+            <article
+              v-for="fav in favoriteItems"
+              :key="fav.dishesId"
+              class="favorite-card"
+              :class="{ unavailable: !fav.available }"
+              @click="fav.available && openDetail(fav)"
+            >
+              <img :src="fav.coverUrl || '/placeholder.png'" class="favorite-image" />
+              <div class="favorite-info">
+                <h4>{{ fav.name }}</h4>
+                <p v-if="fav.available">￥{{ Number(fav.price || 0).toFixed(2) }}</p>
+                <p v-else>已下架</p>
+              </div>
+              <button
+                class="favorite-icon-button active"
+                type="button"
+                title="取消收藏"
+                aria-label="取消收藏"
+                @click.stop="toggleFavorite(fav)"
+              >
+                ♥
+              </button>
+              <button
+                class="favorite-add-button"
+                type="button"
+                title="加入购物车"
+                aria-label="加入购物车"
+                :disabled="!fav.available"
+                @click.stop="addToCart(fav)"
+              >
+                +
+              </button>
+            </article>
+          </div>
+        </section>
+
+        <section v-else-if="activeView === 'orders'" class="order-history single-view-panel">
           <div class="history-title">
             <h3>我的订单</h3>
             <div class="history-actions">
@@ -467,6 +640,13 @@ onUnmounted(() => {
               {{ order.createTime || '-' }} · {{ order.tableNumber ? order.tableNumber + '号桌' : '未记录桌台' }} ·
               ￥{{ Number(order.totalAmount || 0).toFixed(2) }}
             </p>
+            <div v-if="order.refundStatus" class="refund-status-line" :class="`status-${order.refundStatus}`">
+              <strong>{{ refundStatusText(order.refundStatus) }}</strong>
+              <span v-if="order.refundCause">原因：{{ refundCauseText(order.refundCause) }}</span>
+              <span v-if="Number(order.refundStatus) === 4 && order.rejectRefundCause">
+                商家驳回理由：{{ order.rejectRefundCause }}
+              </span>
+            </div>
             <div class="history-items">
               <div v-for="item in order.items || []" :key="item.id" class="history-item">
                 <span>{{ item.name }} x{{ item.quantity }}</span>
@@ -479,12 +659,16 @@ onUnmounted(() => {
                 <em v-else-if="hasEvaluation(order.id, item.dishesId)">已评价</em>
               </div>
             </div>
+            <div class="order-request-actions">
+              <button v-if="canCancelOrder(order)" @click="openOrderRequest(order, 'CANCEL')">取消订单</button>
+              <button v-if="canRequestRefund(order)" @click="openOrderRequest(order, 'REFUND')">申请退款</button>
+            </div>
           </article>
         </section>
       </section>
     </div>
 
-    <footer class="cart-footer">
+    <footer v-if="showCart" class="cart-footer">
       <div class="cart-summary">
         <div class="cart-info">
           <span class="cart-count">共 {{ cartCount }} 份</span>
@@ -528,7 +712,21 @@ onUnmounted(() => {
         <h3>{{ currentDish.name }}</h3>
         <p>{{ currentDish.description || currentDish.detail }}</p>
         <p class="detail-price">￥{{ Number(currentDish.price || 0).toFixed(2) }}</p>
-        <button class="primary-button" @click="addToCart(currentDish)">加入购物车</button>
+        <div class="detail-actions">
+          <button class="primary-button" :disabled="currentDish.available === false" @click="addToCart(currentDish)">
+            加入购物车
+          </button>
+          <button
+            class="favorite-action"
+            :class="{ active: isFavorited(currentDish) }"
+            type="button"
+            :title="isFavorited(currentDish) ? '取消收藏' : '收藏菜品'"
+            :aria-label="isFavorited(currentDish) ? '取消收藏' : '收藏菜品'"
+            @click="toggleFavorite(currentDish)"
+          >
+            {{ isFavorited(currentDish) ? '♥' : '♡' }}
+          </button>
+        </div>
 
         <div class="recommend-wrap">
           <h4 class="recommend-title">推荐搭配</h4>
@@ -583,6 +781,22 @@ onUnmounted(() => {
         <div class="modal-buttons">
           <button @click="evalVisible = false">取消</button>
           <button class="primary-button" @click="submitEvaluation">提交</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="orderRequestVisible" class="modal-overlay" @click.self="orderRequestVisible = false">
+      <div class="modal">
+        <h3>{{ orderRequestType === 'CANCEL' ? '取消订单申请' : '退款申请' }}</h3>
+        <p class="request-order-no">订单号：{{ orderRequestTarget?.orderNo }}</p>
+        <textarea
+          v-model="orderRequestReason"
+          class="eval-textarea"
+          :placeholder="orderRequestType === 'CANCEL' ? '请说明取消订单原因' : '请说明申请退款原因'"
+        ></textarea>
+        <div class="modal-buttons">
+          <button @click="orderRequestVisible = false">取消</button>
+          <button class="primary-button" @click="submitOrderRequest">提交申请</button>
         </div>
       </div>
     </div>
@@ -741,25 +955,59 @@ onUnmounted(() => {
   overflow: hidden;
 }
 .category-sidebar {
-  width: 80px;
+  width: 112px;
   background: #fafafa;
   border-right: 1px solid #eee;
   display: flex;
   flex-direction: column;
-  padding: 10px 0;
+  gap: 6px;
+  padding: 10px 8px;
 }
 .category-btn {
-  padding: 12px 8px;
+  min-height: 44px;
+  padding: 9px 8px;
   border: none;
   background: none;
   cursor: pointer;
   font-size: 14px;
+  border-radius: 8px;
   transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 .category-btn.active {
   background: #fff;
   color: #1890ff;
-  border-left: 3px solid #1890ff;
+  box-shadow: inset 3px 0 0 #1890ff;
+}
+.favorite-category-btn {
+  border: 1px solid #ffd6d6;
+  background: #fff6f6;
+  color: #d43838;
+}
+.favorite-category-btn span {
+  font-size: 16px;
+  line-height: 1;
+}
+.favorite-category-btn.active {
+  background: #ff4d4f;
+  border-color: #ff4d4f;
+  color: #fff;
+  box-shadow: none;
+}
+.order-category-btn {
+  border: 1px solid #d9e6ff;
+  background: #f5f9ff;
+  color: #1767c4;
+}
+.order-category-btn.active {
+  background: #1890ff;
+  border-color: #1890ff;
+  color: #fff;
+  box-shadow: none;
 }
 .menu-area {
   flex: 1;
@@ -769,7 +1017,7 @@ onUnmounted(() => {
   padding: 10px;
 }
 .search-box {
-  margin-bottom: 10px;
+  margin-bottom: 14px;
 }
 .search-input {
   width: 100%;
@@ -778,20 +1026,116 @@ onUnmounted(() => {
   border-radius: 8px;
   box-sizing: border-box;
 }
+.favorites-panel {
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid #ffe0e0;
+  border-radius: 8px;
+  background: #fffafa;
+}
+.single-view-panel {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+.favorites-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.favorites-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.favorites-head span {
+  color: #999;
+  font-size: 12px;
+}
+.favorite-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+}
+.favorite-card {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 28px 28px;
+  align-items: center;
+  gap: 8px;
+  min-height: 68px;
+  padding: 8px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+.favorite-card.unavailable {
+  opacity: 0.58;
+  cursor: default;
+}
+.favorite-image {
+  width: 52px;
+  height: 52px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+.favorite-info {
+  min-width: 0;
+}
+.favorite-info h4 {
+  margin: 0 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.favorite-info p {
+  margin: 0;
+  color: #ff4d4f;
+  font-size: 12px;
+  font-weight: 700;
+}
+.favorite-icon-button,
+.favorite-add-button,
+.favorite-action {
+  display: inline-grid;
+  place-items: center;
+  border: none;
+  cursor: pointer;
+}
+.favorite-icon-button,
+.favorite-add-button {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+}
+.favorite-icon-button {
+  background: #fff1f0;
+  color: #ff4d4f;
+}
+.favorite-add-button {
+  background: #1890ff;
+  color: #fff;
+  font-size: 16px;
+}
+.favorite-add-button:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
 .menu-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 14px;
 }
 .menu-card {
-  aspect-ratio: 1 / 1.18;
+  aspect-ratio: 1 / 1.22;
   border: 1px solid #eee;
   border-radius: 8px;
-  padding: 8px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   cursor: pointer;
   position: relative;
 }
@@ -799,12 +1143,16 @@ onUnmounted(() => {
   position: absolute;
   top: 4px;
   right: 4px;
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
   border: none;
   background: rgba(255, 255, 255, 0.92);
   color: #666;
-  border-radius: 4px;
-  font-size: 11px;
-  padding: 2px 5px;
+  border-radius: 50%;
+  font-size: 16px;
+  padding: 0;
   cursor: pointer;
 }
 .fav-btn.active {
@@ -812,38 +1160,39 @@ onUnmounted(() => {
 }
 .menu-image {
   width: 100%;
-  height: 60px;
+  height: 112px;
   object-fit: cover;
   border-radius: 6px;
-  margin-bottom: 6px;
+  margin-bottom: 10px;
 }
 .menu-title {
-  font-size: 12px;
-  margin: 0 0 4px;
+  font-size: 15px;
+  margin: 0 0 6px;
   text-align: center;
-  line-height: 1.2;
+  line-height: 1.3;
 }
 .menu-sales {
-  font-size: 11px;
+  font-size: 12px;
   color: #999;
-  margin: 0 0 2px;
+  margin: 0 0 4px;
 }
 .menu-price {
-  font-size: 11px;
+  font-size: 15px;
   color: #ff4d4f;
   margin: 0;
+  font-weight: 700;
 }
 .add-btn {
   position: absolute;
-  bottom: 4px;
-  right: 4px;
-  width: 20px;
-  height: 20px;
+  bottom: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
   background: #1890ff;
   color: white;
   border: none;
   border-radius: 50%;
-  font-size: 12px;
+  font-size: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -853,6 +1202,11 @@ onUnmounted(() => {
   margin-top: 16px;
   border-top: 1px solid #eee;
   padding-top: 12px;
+}
+.order-history.single-view-panel {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
 }
 .history-title,
 .history-head,
@@ -906,6 +1260,39 @@ onUnmounted(() => {
 .history-items {
   display: grid;
   gap: 6px;
+}
+.refund-status-line {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f8fbff;
+  color: #1767c4;
+  font-size: 12px;
+}
+.refund-status-line.status-3 {
+  background: #f1f8e9;
+  color: #558b2f;
+}
+.refund-status-line.status-4 {
+  background: #fff1f0;
+  color: #cf1322;
+}
+.order-request-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.order-request-actions button {
+  border: 1px solid #d9e6ff;
+  background: #f5f9ff;
+  color: #1767c4;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
 }
 .cart-footer {
   background: #fff;
@@ -1022,6 +1409,11 @@ onUnmounted(() => {
 .eval-dish-name {
   color: #666;
 }
+.request-order-no {
+  margin: 0 0 10px;
+  color: #666;
+  font-size: 13px;
+}
 .rating-picker {
   display: flex;
   align-items: center;
@@ -1069,6 +1461,22 @@ onUnmounted(() => {
   color: #ff4d4f;
   font-size: 16px;
   font-weight: bold;
+}
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.favorite-action {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #fff1f0;
+  color: #999;
+  font-size: 20px;
+}
+.favorite-action.active {
+  color: #ff4d4f;
 }
 .primary-button {
   background: #1890ff;
@@ -1227,5 +1635,10 @@ onUnmounted(() => {
   padding: 10px;
   border-radius: 8px;
   cursor: pointer;
+}
+@media (max-width: 720px) {
+  .favorite-list {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

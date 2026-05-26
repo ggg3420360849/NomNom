@@ -15,6 +15,10 @@ public class OrderSummary {
     private double totalAmount;
     private int itemCount;
     private LocalDateTime createTime;
+    private Integer refundStatus;
+    private String refundCause;
+    private String rejectRefundCause;
+    private LocalDateTime refundTime;
     private List<OrderItemSummary> items = new ArrayList<>();
 
     public OrderSummary() {
@@ -98,6 +102,38 @@ public class OrderSummary {
 
     public void setCreateTime(LocalDateTime createTime) {
         this.createTime = createTime;
+    }
+
+    public Integer getRefundStatus() {
+        return refundStatus;
+    }
+
+    public void setRefundStatus(Integer refundStatus) {
+        this.refundStatus = refundStatus;
+    }
+
+    public String getRefundCause() {
+        return refundCause;
+    }
+
+    public void setRefundCause(String refundCause) {
+        this.refundCause = refundCause;
+    }
+
+    public String getRejectRefundCause() {
+        return rejectRefundCause;
+    }
+
+    public void setRejectRefundCause(String rejectRefundCause) {
+        this.rejectRefundCause = rejectRefundCause;
+    }
+
+    public LocalDateTime getRefundTime() {
+        return refundTime;
+    }
+
+    public void setRefundTime(LocalDateTime refundTime) {
+        this.refundTime = refundTime;
     }
 
     public List<OrderItemSummary> getItems() {

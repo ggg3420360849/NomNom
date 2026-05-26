@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 public class CollectionItemResponse {
     private Long id;
     private Long dishesId;
+    private Long packageId;
     private String dishName;
     private String dishCover;
     private BigDecimal price;
@@ -15,6 +16,9 @@ public class CollectionItemResponse {
 
     public Long getDishesId() { return dishesId; }
     public void setDishesId(Long dishesId) { this.dishesId = dishesId; }
+
+    public Long getPackageId() { return packageId; }
+    public void setPackageId(Long packageId) { this.packageId = packageId; }
 
     public String getDishName() { return dishName; }
     public void setDishName(String dishName) { this.dishName = dishName; }

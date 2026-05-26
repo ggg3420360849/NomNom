@@ -29,15 +29,21 @@ public interface OrderReadMapper {
                 END AS status,
                 COALESCE(o.total_price, 0) AS totalAmount,
                 COALESCE(SUM(oi.buy_number), 0) AS itemCount,
-                o.create_time AS createTime
+                o.create_time AS createTime,
+                rr.status AS refundStatus,
+                rr.refund_cause AS refundCause,
+                rr.reject_refund_cause AS rejectRefundCause,
+                rr.refun_time AS refundTime
             FROM orders o
             LEFT JOIN `user` u ON u.id = o.user_id
             LEFT JOIN orders_item oi ON oi.orders_id = o.id
+            LEFT JOIN orders_refund_reply rr ON rr.orders_id = o.id
             WHERE 1 = 1
             <if test="userId != null">
                 AND o.user_id = #{userId}
             </if>
-            GROUP BY o.id, o.code, u.username, u.account, o.table_id, o.table_number, o.status, o.total_price, o.create_time
+            GROUP BY o.id, o.code, u.username, u.account, o.table_id, o.table_number, o.status, o.total_price, o.create_time,
+                rr.status, rr.refund_cause, rr.reject_refund_cause, rr.refun_time
             ORDER BY o.create_time DESC, o.id DESC
             LIMIT 20
             </script>

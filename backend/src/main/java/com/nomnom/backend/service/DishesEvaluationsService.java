@@ -92,8 +92,8 @@ public class DishesEvaluationsService {
         if (order == null || !order.getUserId().equals(userId)) {
             throw new IllegalArgumentException("订单不存在或无权评价。");
         }
-        if (!isPaidOrderStatus(order.getStatus())) {
-            throw new IllegalArgumentException("支付完成后即可评价，请先完成订单支付。");
+        if (!isCompletedOrderStatus(order.getStatus())) {
+            throw new IllegalArgumentException("订单完成后才能评价，请等待商家完成订单。");
         }
         if (!orderContainsDish(request.getOrdersId(), request.getDishesId())) {
             throw new IllegalArgumentException("只能评价该订单中购买过的菜品。");
@@ -179,8 +179,8 @@ public class DishesEvaluationsService {
         return false;
     }
 
-    private boolean isPaidOrderStatus(Integer status) {
-        return status != null && (status == 2 || status == 3 || status == 4);
+    private boolean isCompletedOrderStatus(Integer status) {
+        return status != null && status == 4;
     }
 
     private void attachImages(List<EvaluationResponse> evaluations) {

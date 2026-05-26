@@ -15,17 +15,20 @@ public interface CollectionReadMapper {
             SELECT
                 c.id AS id,
                 c.dishes_id AS dishesId,
+                dp.id AS packageId,
                 d.name AS dishName,
                 d.cover_url AS dishCover,
-                COALESCE(dp.minPrice, 0) AS price,
+                COALESCE(dp.price, 0) AS price,
                 d.status AS dishStatus
             FROM collection c
             LEFT JOIN dishes d ON d.id = c.dishes_id
-            LEFT JOIN (
-                SELECT dishes_id, MIN(price) AS minPrice
-                FROM dishes_package
-                GROUP BY dishes_id
-            ) dp ON dp.dishes_id = c.dishes_id
+            LEFT JOIN dishes_package dp ON dp.id = (
+                SELECT p.id
+                FROM dishes_package p
+                WHERE p.dishes_id = c.dishes_id
+                ORDER BY COALESCE(p.price, 0), p.id
+                LIMIT 1
+            )
             WHERE c.user_id = #{userId}
             ORDER BY c.id DESC
             </script>

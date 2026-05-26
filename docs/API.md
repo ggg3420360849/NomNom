@@ -982,7 +982,7 @@ Authorization: Bearer <token>
 | `id` | `number` | 桌台 ID |
 | `number` | `string` | 桌台编号 |
 | `personNumber` | `number` | 可容纳人数 |
-| `status` | `number` | 0=空闲，1=已入座，2=就餐中 |
+| `status` | `number` | 0=空闲，1=已入座，2=就餐中，3=已下单，4=待结账，5=预订中，6=维修中 |
 | `area` | `string` | 所属区域 |
 | `amount` | `number` | 当前消费总额 |
 | `minSpend` | `number` | 最低消费 |
@@ -999,9 +999,9 @@ Authorization: Bearer <token>
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `tableId` | `number` | 是 | 桌台 ID |
-| `status` | `number` | 是 | 目标状态（0=空闲，1=已入座，2=就餐中） |
+| `status` | `number` | 是 | 目标状态（0=空闲，1=已入座，2=就餐中，3=已下单，4=待结账，5=预订中，6=维修中） |
 
-> 设为 0（空闲）时自动清零消费金额。
+> 设为 0（空闲）、5（预订中）、6（维修中）时自动清零消费金额；顾客端仅展示 0（空闲）桌台。
 
 **成功响应** (200):
 
@@ -1374,6 +1374,7 @@ Authorization: Bearer <token>
     {
       "id": 1,
       "dishesId": 1,
+      "packageId": 3,
       "dishName": "招牌毛肚",
       "dishCover": "/uploads/maodu.jpg",
       "price": 68.00,
@@ -1387,6 +1388,7 @@ Authorization: Bearer <token>
 |------|------|------|
 | `id` | `number` | 收藏记录 ID |
 | `dishesId` | `number` | 菜品 ID |
+| `packageId` | `number` | 该菜品最低价套餐 ID，可用于顾客端加购 |
 | `dishName` | `string` | 菜品名称 |
 | `dishCover` | `string` | 菜品封面 |
 | `price` | `number` | 该菜品最低套餐价 |
@@ -1513,6 +1515,8 @@ Content-Type: application/json
 | `content` | `string` | 否 | 评价内容 |
 | `imageUrls` | `array` | 否 | 图片链接数组 |
 
+> 仅订单状态为 `COMPLETED`（已完成）时允许提交评价；同一订单内同一菜品只能评价一次。
+
 **成功响应**: `{ "success": true, "message": "评价成功", "data": null }`
 
 ---
@@ -1615,11 +1619,11 @@ Authorization: Bearer <token>
 
 ---
 
-## 12. 退款模块
+## 12. 取消订单与退款模块
 
-> 顾客提交退款需登录，商家审核退款需商家角色。
+> 顾客提交取消订单/退款申请需登录，商家审核需商家角色；通过后自动退回顾客钱包，驳回时必须填写理由。
 
-### 12.1 提交退款申请
+### 12.1 提交取消订单或退款申请
 
 ```
 POST /api/refunds
@@ -1632,6 +1636,7 @@ Content-Type: application/json
 ```json
 {
   "ordersId": 1,
+  "requestType": "REFUND",
   "refundCause": "菜品份量太少"
 }
 ```
@@ -1639,11 +1644,12 @@ Content-Type: application/json
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `ordersId` | `number` | 是 | 订单 ID |
-| `refundCause` | `string` | 否 | 退款原因 |
+| `requestType` | `string` | 否 | `CANCEL` = 取消订单，`REFUND` = 申请退款；默认 `REFUND` |
+| `refundCause` | `string` | 是 | 取消/退款原因 |
 
-> 同一订单只能提交一次退款申请，重复提交会失败。
+> 同一订单只能提交一次售后申请。`CANCEL` 仅支持已支付/制作中的订单；`REFUND` 仅支持已完成订单。
 
-**成功响应**: `{ "success": true, "message": "退款申请已提交", "data": null }`
+**成功响应**: `{ "success": true, "message": "申请已提交，等待商家审核", "data": null }`
 
 ---
 
@@ -1673,7 +1679,7 @@ GET /api/refunds/order/{ordersId}
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `status` | `number` | `1` = 无退款，`2` = 退款中，`3` = 已退款，`4` = 拒绝退款 |
+| `status` | `number` | `1` = 无退款，`2` = 审核中，`3` = 已退款，`4` = 已驳回 |
 
 ---
 

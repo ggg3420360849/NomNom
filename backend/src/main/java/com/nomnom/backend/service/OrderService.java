@@ -38,6 +38,8 @@ public class OrderService {
     private static final DateTimeFormatter ORDER_CODE_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final int ROLE_MERCHANT = 2;
     private static final int MESSAGE_TYPE_ORDER = 2;
+    private static final int TABLE_STATUS_IDLE = 0;
+    private static final int TABLE_STATUS_ORDERED = 3;
 
     private final OrderReadMapper orderReadMapper;
     private final PackageReadMapper packageReadMapper;
@@ -133,7 +135,7 @@ public class OrderService {
         deductStock(resolvedOrder.lines);
         updateTableAfterPayment(table, resolvedOrder.totalAmount);
         messagesService.createMessage(request.getUserId(),
-                "订单 " + order.getCode() + " 已支付成功，可在我的订单中评价菜品。",
+                "订单 " + order.getCode() + " 已支付成功，订单完成后可在我的订单中评价菜品。",
                 MESSAGE_TYPE_ORDER);
         messagesService.createMessageForRole(ROLE_MERCHANT,
                 "收到新订单 " + order.getCode() + "，金额 ￥" + resolvedOrder.totalAmount,
@@ -213,6 +215,10 @@ public class OrderService {
         if (table == null) {
             throw new IllegalArgumentException("桌台不存在。");
         }
+        Integer status = table.getStatus() != null ? table.getStatus() : TABLE_STATUS_IDLE;
+        if (status != TABLE_STATUS_IDLE) {
+            throw new IllegalArgumentException("桌台当前为" + resolveTableStatusLabel(status) + "，请选择空闲桌台。");
+        }
         return table;
     }
 
@@ -245,8 +251,32 @@ public class OrderService {
         }
         BigDecimal current = table.getAmount() != null ? table.getAmount() : BigDecimal.ZERO;
         table.setAmount(current.add(amount));
-        table.setStatus(1);
+        table.setStatus(TABLE_STATUS_ORDERED);
         tableMapper.updateById(table);
+    }
+
+    private String resolveTableStatusLabel(Integer status) {
+        if (status == null) {
+            return "未知";
+        }
+        switch (status) {
+            case TABLE_STATUS_IDLE:
+                return "空闲";
+            case 1:
+                return "已入座";
+            case 2:
+                return "就餐中";
+            case TABLE_STATUS_ORDERED:
+                return "已下单";
+            case 4:
+                return "待结账";
+            case 5:
+                return "预订中";
+            case 6:
+                return "维修中";
+            default:
+                return "未知状态";
+        }
     }
 
     private String resolveCustomerName(OrderDraftRequest request) {

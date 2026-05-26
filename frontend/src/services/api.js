@@ -161,7 +161,9 @@ export const merchantApi = {
 
   // --- B03 & B04 审核、对账与评价分析 ---
   getAudits: () => axiosRequest.get('/admin/audits'),
-  auditRegistrationOrRefund: (id, approved) => axiosRequest.put(`/admin/audit/${id}`, null, { params: { approved } }),
+  auditRegistrationOrRefund: (id, approved, cause = '') => axiosRequest.put(`/admin/audit/${id}`, null, {
+    params: cause ? { approved, cause } : { approved }
+  }),
   getFinanceReconciliation: () => axiosRequest.get('/admin/finance/reconciliation'),
   submitComment: (data) => axiosRequest.post('/customer/comment', data),
 
@@ -186,6 +188,7 @@ export const customerApi = {
   toggleCollection: (dishesId) => axiosRequest.post('/collection/toggle', null, { params: { dishesId } }),
   getMyEvaluations: () => axiosRequest.get('/evaluations/my'),
   createEvaluation: (data) => axiosRequest.post('/evaluations', data),
+  submitRefund: (data) => axiosRequest.post('/refunds', data),
   getMessages: () => axiosRequest.get('/messages'),
   getUnreadCount: () => axiosRequest.get('/messages/unread-count'),
   markMessageRead: (id) => axiosRequest.put(`/messages/${id}/read`),

@@ -42,6 +42,14 @@ const TABLE_STATUS = {
   5: { label: '预订中', class: 'status-booked', color: '#7b1fa2' },
   6: { label: '维修中', class: 'status-repair', color: '#795548' }
 }
+const TABLE_STATUS_OPTIONS = Object.entries(TABLE_STATUS).map(([value, meta]) => ({
+  value: Number(value),
+  label: meta.label
+}))
+
+function tableStatus(status) {
+  return TABLE_STATUS[status] || { label: '未知', class: 'status-unknown', color: '#9e9e9e' }
+}
 
 const selectedArea = ref('全部')
 const tableList = ref([])
@@ -51,8 +59,8 @@ const tableAreas = ref([])
 function formatTable(raw) {
   return {
     id: raw.id, number: raw.number, name: (raw.personNumber || 2) + '人桌',
-    seats: raw.personNumber || 2, area: raw.area || '大厅', status: raw.status || 0,
-    amount: raw.amount || 0, minSpend: raw.minSpend || 0,
+    seats: raw.personNumber || 2, area: raw.area || '大厅', status: Number(raw.status ?? 0),
+    amount: Number(raw.amount || 0), minSpend: Number(raw.minSpend || 0),
   }
 }
 
@@ -194,15 +202,23 @@ const saveDish = async () => {
   } catch (err) { showToast(getErrorMessage(err, '保存失败')) }
 };
 
-const handleTableClick = async (table) => {
-  let nextStatus = table.status === 0 ? 1 : 0; if (table.status === 4) nextStatus = 0;
-  try { await merchantApi.updateTableStatus(table.id, nextStatus); await fetchTables(); } catch { }
-};
+async function updateTableStatus(table, status) {
+  try {
+    await merchantApi.updateTableStatus(table.id, status)
+    await fetchTables()
+    showToast(`桌台 ${table.number} 已设为${tableStatus(status).label}`)
+  } catch (err) {
+    showToast(getErrorMessage(err, '桌台状态更新失败'))
+  }
+}
 
 const orderList = ref([]); const auditList = ref([]); const reconciliationList = ref([]); const reviewList = ref([]); const statsList = ref([]);
 const messageList = ref([]); const unreadMessages = ref(0); const messagesVisible = ref(false);
 let messageTimer = null;
 const orderStatusFilter = ref(null); const ORDER_STATUS = { 1: '待支付', 2: '已支付', 3: '制作中', 4: '已完成', 5: '已取消' };
+const rejectAuditVisible = ref(false)
+const rejectingAudit = ref(null)
+const rejectAuditReason = ref('')
 
 async function fetchOrders() { try { const res = await merchantApi.getOrders(orderStatusFilter.value); orderList.value = res.data?.data || res.data || [] } catch { } }
 async function fetchAudits() { try { const res = await merchantApi.getAudits(); auditList.value = res.data?.data || [] } catch { } }
@@ -303,10 +319,31 @@ async function handleAuditAction(id, isPass) {
   }
 }
 
-const tableForm = reactive({ number: '', personNumber: 2, area: '大厅', minSpend: 0 })
+function openAuditReject(audit) {
+  rejectingAudit.value = audit
+  rejectAuditReason.value = ''
+  rejectAuditVisible.value = true
+}
+
+async function submitAuditReject() {
+  const reason = rejectAuditReason.value.trim()
+  if (!reason) return showToast('请填写驳回理由')
+  try {
+    await merchantApi.auditRegistrationOrRefund(rejectingAudit.value.id, false, reason)
+    showToast('申请已驳回')
+    rejectAuditVisible.value = false
+    await fetchAudits()
+    await fetchReconciliation()
+    await loadMessages()
+  } catch (err) {
+    showToast(getErrorMessage(err, '审批失败'))
+  }
+}
+
+const tableForm = reactive({ number: '', personNumber: 2, area: '大厅', minSpend: 0, status: 0 })
 const showTableForm = ref(false); const editingTableId = ref(null);
-function openAddTable() { editingTableId.value = null; Object.assign(tableForm, { number: '', personNumber: 2, area: '大厅', minSpend: 0 }); showTableForm.value = true; }
-function openEditTable(table) { editingTableId.value = table.id; Object.assign(tableForm, { number: table.number, personNumber: table.seats, area: table.area, minSpend: table.minSpend || 0 }); showTableForm.value = true }
+function openAddTable() { editingTableId.value = null; Object.assign(tableForm, { number: '', personNumber: 2, area: '大厅', minSpend: 0, status: 0 }); showTableForm.value = true; }
+function openEditTable(table) { editingTableId.value = table.id; Object.assign(tableForm, { number: table.number, personNumber: table.seats, area: table.area, minSpend: table.minSpend || 0, status: table.status }); showTableForm.value = true }
 async function saveTable() { try { if (editingTableId.value) await merchantApi.updateTable(editingTableId.value, tableForm); else await merchantApi.addTable(tableForm); showTableForm.value = false; await fetchTables(); } catch { } }
 async function removeTable(table) { try { await merchantApi.deleteTable(table.id); await fetchTables(); } catch { } }
 
@@ -503,14 +540,23 @@ onUnmounted(() => {
             <div class="status-legends"><span v-for="(v, k) in TABLE_STATUS" :key="k"><i :style="{ backgroundColor: v.color }"></i> {{ v.label }}</span></div>
           </div>
           <div class="visual-grid">
-            <div v-for="table in filteredTables" :key="table.id" class="table-card" :class="TABLE_STATUS[table.status].class" @click="handleTableClick(table)">
+            <div v-for="table in filteredTables" :key="table.id" class="table-card" :class="tableStatus(table.status).class">
               <div class="card-top"><span class="t-no">{{ table.number }}</span><span class="t-area">{{ table.area }}</span></div>
               <div class="card-mid">
                 <p class="t-seats">{{ table.seats }} 人桌</p>
                 <p v-if="table.amount > 0" class="t-amount">￥{{ table.amount.toFixed(2) }}</p>
-                <p v-else class="t-status-text">{{ TABLE_STATUS[table.status].label }}</p>
+                <p class="t-status-text">{{ tableStatus(table.status).label }}</p>
               </div>
-              <div style="display:flex;gap:4px;margin-top:8px;justify-content:center">
+              <div class="table-card-actions">
+                <select
+                  class="table-status-select"
+                  :value="table.status"
+                  @change="updateTableStatus(table, Number($event.target.value))"
+                >
+                  <option v-for="option in TABLE_STATUS_OPTIONS" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
                 <button class="btn-link" @click.stop="openEditTable(table)" style="font-size:12px">编辑</button>
                 <button class="btn-link danger" @click.stop="removeTable(table)" style="font-size:12px">删除</button>
               </div>
@@ -553,9 +599,11 @@ onUnmounted(() => {
                 <td>
                   <div v-if="audit.status==='PENDING'" style="display:flex; gap:6px;">
                     <button class="btn-primary" @click="handleAuditAction(audit.id, true)" style="padding:4px 10px; font-size:12px;">通过</button>
-                    <button class="btn-cancel" @click="handleAuditAction(audit.id, false)" style="padding:4px 10px; font-size:12px;">驳回</button>
+                    <button class="btn-cancel" @click="openAuditReject(audit)" style="padding:4px 10px; font-size:12px;">驳回</button>
                   </div>
-                  <span v-else style="color:#999;font-size:12px;">无需处理</span>
+                  <span v-else style="color:#999;font-size:12px;">
+                    {{ audit.status === 'REJECTED' && audit.rejectCause ? '已驳回：' + audit.rejectCause : '无需处理' }}
+                  </span>
                 </td>
               </tr>
               </tbody>
@@ -666,9 +714,34 @@ onUnmounted(() => {
             <div class="form-group"><label>桌号</label><input v-model="tableForm.number" /></div>
             <div class="form-group"><label>人数</label><input type="number" v-model.number="tableForm.personNumber" /></div>
             <div class="form-group"><label>区域</label><input v-model="tableForm.area" /></div>
+            <div class="form-group">
+              <label>桌台状态</label>
+              <select v-model.number="tableForm.status">
+                <option v-for="option in TABLE_STATUS_OPTIONS" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </div>
           </div>
         </div>
         <div class="modal-footer"><button class="btn-cancel" @click="showTableForm = false">取消</button><button class="btn-primary" @click="saveTable">保存</button></div>
+      </div>
+    </div>
+
+    <div v-if="rejectAuditVisible" class="biz-modal">
+      <div class="modal-content">
+        <div class="modal-header"><h3>驳回申请</h3><button @click="rejectAuditVisible = false">×</button></div>
+        <div class="modal-body">
+          <p class="audit-reject-desc">{{ rejectingAudit?.desc }}</p>
+          <div class="form-group">
+            <label>驳回理由</label>
+            <textarea v-model="rejectAuditReason" class="audit-reject-textarea" placeholder="请向顾客说明拒绝原因"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancel" @click="rejectAuditVisible = false">取消</button>
+          <button class="btn-primary" @click="submitAuditReject">确认驳回</button>
+        </div>
       </div>
     </div>
   </div>
@@ -785,7 +858,7 @@ onUnmounted(() => {
 .chip-gray { background: #f5f5f5; color: #9e9e9e; border: 1px solid #eeeeee; }
 .chip-orange { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
 .visual-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 20px; }
-.table-card { border-radius: 10px; padding: 16px; border-top: 5px solid #e0d4c3; background: #fffcf8; cursor: pointer; transition: 0.3s; position: relative; display: flex; flex-direction: column; min-height: 120px; box-shadow: 0 2px 8px rgba(121, 85, 72, 0.05);}
+.table-card { border-radius: 10px; padding: 16px; border-top: 5px solid #e0d4c3; background: #fffcf8; transition: 0.3s; position: relative; display: flex; flex-direction: column; min-height: 142px; box-shadow: 0 2px 8px rgba(121, 85, 72, 0.05);}
 .table-card:hover { transform: translateY(-4px); box-shadow: 0 10px 20px rgba(121, 85, 72, 0.1); }
 .status-idle { background: #f1f8e9; border-top-color: #7cb342; }
 .status-seated { background: #fff3e0; border-top-color: #ff9800; }
@@ -793,12 +866,18 @@ onUnmounted(() => {
 .status-ordered { background: #fbe9e7; border-top-color: #ff5722; }
 .status-pending { background: #ffebee; border-top-color: #e53935; }
 .status-booked { background: #f3e5f5; border-top-color: #8e24aa; }
+.status-repair { background: #efebe9; border-top-color: #795548; }
+.status-unknown { background: #f5f5f5; border-top-color: #9e9e9e; }
 .card-top { display: flex; justify-content: space-between; margin-bottom: 12px; color: #4e342e;}
 .t-no { font-size: 20px; font-weight: bold; }
 .t-area { font-size: 12px; opacity: 0.7; }
 .card-mid { flex: 1; text-align: center; }
 .t-seats { color: #8d6e63; font-size: 14px; }
 .t-amount { color: #d32f2f; font-size: 18px; font-weight: bold; }
+.t-status-text { margin: 4px 0 0; color: #5d4037; font-size: 13px; font-weight: 600; }
+.table-card-actions { display:flex; gap:6px; margin-top:10px; justify-content:center; align-items:center; flex-wrap:wrap; }
+.table-status-select { min-width: 86px; padding: 4px 8px; border: 1px solid #e0d4c3; border-radius: 6px; background: #fff; color: #4e342e; font-size: 12px; }
+.table-status-select:focus { outline: none; border-color: #f57c00; }
 
 /* === 分类透视手风琴样式 === */
 .preset-category-panel { background: #fffdf9; border: 1px dashed #f57c00; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
@@ -839,6 +918,9 @@ onUnmounted(() => {
 .form-group label { font-size: 14px; font-weight: 500; color: #5d4037;}
 .form-group input[type="text"], .form-group input[type="number"], .form-group select { padding: 8px 12px; border: 1px solid #e0d4c3; border-radius: 6px; background: white; color:#4e342e;}
 .form-group input:focus, .form-group select:focus { outline: none; border-color: #f57c00;}
+.audit-reject-desc { margin: 0 0 12px; color: #5d4037; font-size: 14px; }
+.audit-reject-textarea { min-height: 96px; padding: 10px 12px; border: 1px solid #e0d4c3; border-radius: 6px; resize: vertical; color: #4e342e; }
+.audit-reject-textarea:focus { outline: none; border-color: #f57c00; }
 
 .recommend-select-box { display: flex; flex-wrap: wrap; gap: 10px; max-height: 200px; overflow-y: auto; border: 1px solid #f0e6d2; border-radius: 6px; padding: 10px; background: white; }
 .recommend-checkbox { display: flex; align-items: center; gap: 8px; padding: 8px; background: #f9f5f0; border: 1px solid #e0d4c3; border-radius: 6px; cursor: pointer; transition: 0.2s; width: calc(50% - 5px); box-sizing: border-box; }

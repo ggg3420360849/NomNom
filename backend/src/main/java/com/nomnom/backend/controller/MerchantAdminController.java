@@ -31,6 +31,13 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/admin")
 public class MerchantAdminController {
+    private static final int TABLE_STATUS_IDLE = 0;
+    private static final int TABLE_STATUS_SEATED = 1;
+    private static final int TABLE_STATUS_DINING = 2;
+    private static final int TABLE_STATUS_ORDERED = 3;
+    private static final int TABLE_STATUS_PENDING = 4;
+    private static final int TABLE_STATUS_BOOKED = 5;
+    private static final int TABLE_STATUS_REPAIR = 6;
 
     private final DishesMapper dishesMapper;
     private final DishesTableMapper tableMapper;
@@ -330,10 +337,11 @@ public class MerchantAdminController {
         }
         order.setStatus(status);
         ordersMapper.updateById(order);
+        syncTableStatusWithOrder(order, status);
         if (order.getUserId() != null) {
             messagesService.createMessage(order.getUserId(),
                     "订单 " + order.getCode() + " 状态更新为：" + resolveOrderStatusLabel(status)
-                            + (isPaidOrderStatus(status) ? "，可在我的订单中评价菜品。" : ""),
+                            + (isCompletedOrderStatus(status) ? "，可在我的订单中评价菜品。" : ""),
                     2);
         }
         return ApiResponse.ok("状态更新成功", null);
@@ -399,9 +407,11 @@ public class MerchantAdminController {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("id", refund.getId());
             row.put("type", "REFUND");
-            row.put("desc", "订单 " + resolveOrderCode(order, refund.getOrdersId()) + " 退款原因："
-                    + normalizeDisplayText(refund.getRefundCause(), "未填写"));
+            row.put("desc", "订单 " + resolveOrderCode(order, refund.getOrdersId()) + " "
+                    + resolveRefundRequestLabel(refund.getRefundCause()) + "原因："
+                    + stripRefundRequestPrefix(normalizeDisplayText(refund.getRefundCause(), "未填写")));
             row.put("status", resolveRefundStatus(refund.getStatus()));
+            row.put("rejectCause", refund.getRejectRefundCause());
             row.put("createTime", refund.getCreateTime());
             rows.add(row);
         }
@@ -435,7 +445,8 @@ public class MerchantAdminController {
 
     @PutMapping("/audit/{id}")
     public ApiResponse<Void> auditRegistrationOrRefund(@PathVariable String id,
-                                                       @RequestParam Boolean approved) {
+                                                       @RequestParam Boolean approved,
+                                                       @RequestParam(required = false) String cause) {
         Long refundId = parseRefundAuditId(id);
         if (refundId == null) {
             return ApiResponse.fail("充值记录无需审批");
@@ -444,7 +455,7 @@ public class MerchantAdminController {
             refundService.approveRefund(refundId);
             return ApiResponse.ok("审批已通过", null);
         }
-        refundService.rejectRefund(refundId, "商家驳回");
+        refundService.rejectRefund(refundId, cause);
         return ApiResponse.ok("申请已驳回", null);
     }
 
@@ -518,6 +529,7 @@ public class MerchantAdminController {
     public ApiResponse<List<DishesTableEntity>> getTablesForCustomer() {
         List<DishesTableEntity> tables = tableMapper.selectList(
                 new LambdaQueryWrapper<DishesTableEntity>()
+                        .eq(DishesTableEntity::getStatus, TABLE_STATUS_IDLE)
                         .orderByAsc(DishesTableEntity::getArea)
                         .orderByAsc(DishesTableEntity::getNumber));
         return ApiResponse.ok("获取桌台成功", tables);
@@ -525,20 +537,32 @@ public class MerchantAdminController {
 
     @PutMapping("/tables/status")
     public ApiResponse<Void> updateTableStatus(@RequestParam Integer tableId, @RequestParam Integer status) {
+        if (!isValidTableStatus(status)) {
+            return ApiResponse.fail("桌台状态不合法");
+        }
         DishesTableEntity table = tableMapper.selectById(tableId);
         if (table == null) {
             return ApiResponse.fail("桌台不存在");
         }
         table.setStatus(status);
-        if (status == 0) {
+        if (shouldClearTableAmount(status)) {
             table.setAmount(BigDecimal.ZERO);
         }
         tableMapper.updateById(table);
-        return ApiResponse.ok("状态更新成功", null);
+        return ApiResponse.ok("桌台已设为" + resolveTableStatusLabel(status), null);
     }
 
     @PostMapping("/tables")
     public ApiResponse<Void> addTable(@RequestBody DishesTableEntity table) {
+        if (table.getStatus() == null) {
+            table.setStatus(TABLE_STATUS_IDLE);
+        } else if (!isValidTableStatus(table.getStatus())) {
+            return ApiResponse.fail("桌台状态不合法");
+        }
+        if (table.getAmount() == null) {
+            table.setAmount(BigDecimal.ZERO);
+        }
+        table.setCreateTime(LocalDateTime.now());
         tableMapper.insert(table);
         return ApiResponse.ok("新增成功", null);
     }
@@ -553,6 +577,15 @@ public class MerchantAdminController {
         table.setPersonNumber(request.getPersonNumber());
         table.setArea(request.getArea());
         table.setMinSpend(request.getMinSpend());
+        if (request.getStatus() != null) {
+            if (!isValidTableStatus(request.getStatus())) {
+                return ApiResponse.fail("桌台状态不合法");
+            }
+            table.setStatus(request.getStatus());
+            if (shouldClearTableAmount(request.getStatus())) {
+                table.setAmount(BigDecimal.ZERO);
+            }
+        }
         tableMapper.updateById(table);
         return ApiResponse.ok("更新成功", null);
     }
@@ -718,6 +751,23 @@ public class MerchantAdminController {
         return value.trim();
     }
 
+    private String resolveRefundRequestLabel(String refundCause) {
+        return refundCause != null && refundCause.startsWith("取消订单：") ? "取消订单" : "退款";
+    }
+
+    private String stripRefundRequestPrefix(String refundCause) {
+        if (refundCause == null) {
+            return "";
+        }
+        if (refundCause.startsWith("取消订单：")) {
+            return refundCause.substring("取消订单：".length());
+        }
+        if (refundCause.startsWith("退款：")) {
+            return refundCause.substring("退款：".length());
+        }
+        return refundCause;
+    }
+
     private String resolveDishName(String snapName) {
         String value = normalizeDisplayText(snapName, "未知菜品");
         int packageIndex = value.indexOf(" - ");
@@ -755,8 +805,61 @@ public class MerchantAdminController {
         }
     }
 
-    private boolean isPaidOrderStatus(Integer status) {
-        return status != null && (status == 2 || status == 3 || status == 4);
+    private boolean isCompletedOrderStatus(Integer status) {
+        return status != null && status == 4;
+    }
+
+    private boolean isValidTableStatus(Integer status) {
+        return status != null && status >= TABLE_STATUS_IDLE && status <= TABLE_STATUS_REPAIR;
+    }
+
+    private boolean shouldClearTableAmount(Integer status) {
+        return status != null && (status == TABLE_STATUS_IDLE
+                || status == TABLE_STATUS_BOOKED
+                || status == TABLE_STATUS_REPAIR);
+    }
+
+    private String resolveTableStatusLabel(Integer status) {
+        if (status == null) {
+            return "未知";
+        }
+        switch (status) {
+            case TABLE_STATUS_IDLE:
+                return "空闲";
+            case TABLE_STATUS_SEATED:
+                return "已入座";
+            case TABLE_STATUS_DINING:
+                return "就餐中";
+            case TABLE_STATUS_ORDERED:
+                return "已下单";
+            case TABLE_STATUS_PENDING:
+                return "待结账";
+            case TABLE_STATUS_BOOKED:
+                return "预订中";
+            case TABLE_STATUS_REPAIR:
+                return "维修中";
+            default:
+                return "未知";
+        }
+    }
+
+    private void syncTableStatusWithOrder(OrdersEntity order, Integer orderStatus) {
+        if (order == null || order.getTableId() == null || orderStatus == null) {
+            return;
+        }
+        DishesTableEntity table = tableMapper.selectById(order.getTableId());
+        if (table == null || (table.getStatus() != null && table.getStatus() == TABLE_STATUS_REPAIR)) {
+            return;
+        }
+        if (orderStatus == 2) {
+            table.setStatus(TABLE_STATUS_ORDERED);
+        } else if (orderStatus == 3) {
+            table.setStatus(TABLE_STATUS_DINING);
+        } else if (orderStatus == 4 || orderStatus == 5) {
+            table.setStatus(TABLE_STATUS_IDLE);
+            table.setAmount(BigDecimal.ZERO);
+        }
+        tableMapper.updateById(table);
     }
 
     private String normalizeOptionalText(String value) {

@@ -23,6 +23,7 @@ public class TableController {
     @GetMapping("/available")
     public ApiResponse<List<DishesTableEntity>> availableTables() {
         return ApiResponse.ok(tableMapper.selectList(new LambdaQueryWrapper<DishesTableEntity>()
+                .eq(DishesTableEntity::getStatus, 0)
                 .orderByAsc(DishesTableEntity::getArea)
                 .orderByAsc(DishesTableEntity::getNumber)));
     }
