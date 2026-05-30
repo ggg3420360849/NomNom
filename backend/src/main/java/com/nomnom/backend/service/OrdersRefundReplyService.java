@@ -24,10 +24,12 @@ public class OrdersRefundReplyService {
     private static final int ORDER_STATUS_PREPARING = 3;
     private static final int ORDER_STATUS_COMPLETED = 4;
     private static final int ORDER_STATUS_CANCELED = 5;
+    private static final List<Integer> ACTIVE_ORDER_STATUSES = List.of(1, ORDER_STATUS_PAID, ORDER_STATUS_PREPARING);
     private static final int REFUND_STATUS_PENDING = 2;
     private static final int REFUND_STATUS_APPROVED = 3;
     private static final int REFUND_STATUS_REJECTED = 4;
     private static final int TABLE_STATUS_IDLE = 0;
+    private static final int TABLE_STATUS_SEATED = 1;
     private static final int TABLE_STATUS_REPAIR = 6;
     private static final String REQUEST_TYPE_CANCEL = "CANCEL";
     private static final String REQUEST_TYPE_REFUND = "REFUND";
@@ -129,7 +131,7 @@ public class OrdersRefundReplyService {
             walletService.refund(order.getUserId(), refundAmount, order.getCode());
             order.setStatus(ORDER_STATUS_CANCELED);
             ordersMapper.updateById(order);
-            releaseTable(order);
+            syncTableAfterOrderChange(order);
             messagesService.createMessage(order.getUserId(),
                     "订单 " + resolveOrderCode(order, order.getId()) + " 的" + resolveStoredRequestLabel(entity.getRefundCause())
                             + "申请已通过，金额 ￥" + refundAmount + " 已退回钱包。",
@@ -184,17 +186,74 @@ public class OrdersRefundReplyService {
         }
     }
 
-    private void releaseTable(OrdersEntity order) {
-        if (order.getTableId() == null) {
-            return;
-        }
-        DishesTableEntity table = tableMapper.selectById(order.getTableId());
+    private void syncTableAfterOrderChange(OrdersEntity order) {
+        DishesTableEntity table = resolveOrderTable(order);
         if (table == null || (table.getStatus() != null && table.getStatus() == TABLE_STATUS_REPAIR)) {
             return;
         }
-        table.setStatus(TABLE_STATUS_IDLE);
-        table.setAmount(BigDecimal.ZERO);
+
+        List<OrdersEntity> activeOrders = selectActiveOrdersForTable(table);
+        if (activeOrders.isEmpty()) {
+            table.setStatus(TABLE_STATUS_IDLE);
+            table.setAmount(BigDecimal.ZERO);
+            table.setOccupiedBy(null);
+            tableMapper.updateById(table);
+            return;
+        }
+
+        BigDecimal activeAmount = activeOrders.stream()
+                .map(OrdersEntity::getTotalPrice)
+                .filter(amount -> amount != null)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        table.setStatus(TABLE_STATUS_SEATED);
+        table.setAmount(activeAmount);
+        table.setOccupiedBy(activeOrders.get(0).getUserId());
         tableMapper.updateById(table);
+    }
+
+    private DishesTableEntity resolveOrderTable(OrdersEntity order) {
+        if (order == null) {
+            return null;
+        }
+        if (order.getTableId() != null) {
+            DishesTableEntity table = tableMapper.selectById(order.getTableId());
+            if (table != null) {
+                return table;
+            }
+        }
+        String tableNumber = normalizeOptionalText(order.getTableNumber());
+        if (tableNumber == null) {
+            return null;
+        }
+        return tableMapper.selectOne(new LambdaQueryWrapper<DishesTableEntity>()
+                .eq(DishesTableEntity::getNumber, tableNumber)
+                .last("LIMIT 1"));
+    }
+
+    private List<OrdersEntity> selectActiveOrdersForTable(DishesTableEntity table) {
+        LambdaQueryWrapper<OrdersEntity> wrapper = new LambdaQueryWrapper<OrdersEntity>()
+                .in(OrdersEntity::getStatus, ACTIVE_ORDER_STATUSES);
+        String tableNumber = normalizeOptionalText(table.getNumber());
+        if (table.getId() != null && tableNumber != null) {
+            wrapper.and(q -> q.eq(OrdersEntity::getTableId, table.getId())
+                    .or()
+                    .eq(OrdersEntity::getTableNumber, tableNumber));
+        } else if (table.getId() != null) {
+            wrapper.eq(OrdersEntity::getTableId, table.getId());
+        } else if (tableNumber != null) {
+            wrapper.eq(OrdersEntity::getTableNumber, tableNumber);
+        } else {
+            return List.of();
+        }
+        return ordersMapper.selectList(wrapper);
+    }
+
+    private String normalizeOptionalText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private String resolveOrderCode(OrdersEntity order, Long fallbackId) {

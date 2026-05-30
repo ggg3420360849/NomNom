@@ -33,11 +33,8 @@ import java.util.stream.Collectors;
 public class MerchantAdminController {
     private static final int TABLE_STATUS_IDLE = 0;
     private static final int TABLE_STATUS_SEATED = 1;
-    private static final int TABLE_STATUS_DINING = 2;
-    private static final int TABLE_STATUS_ORDERED = 3;
-    private static final int TABLE_STATUS_PENDING = 4;
-    private static final int TABLE_STATUS_BOOKED = 5;
     private static final int TABLE_STATUS_REPAIR = 6;
+    private static final List<Integer> ACTIVE_ORDER_STATUSES = List.of(1, 2, 3);
 
     private final DishesMapper dishesMapper;
     private final DishesTableMapper tableMapper;
@@ -123,7 +120,6 @@ public class MerchantAdminController {
             r.setStatus(d.getStatus());
             r.setStock(d.getStock());
             r.setPrice(priceMap.getOrDefault(d.getId() != null ? d.getId().longValue() : -1L, BigDecimal.ZERO));
-            r.setMemberPrice(d.getMemberPrice());
             r.setSpecs(d.getSpecs());
             r.setIsRecommend(d.getIsRecommend() != null ? d.getIsRecommend() : 0);
             r.setRecommendIds(d.getRecommendIds());
@@ -329,6 +325,7 @@ public class MerchantAdminController {
         return ApiResponse.ok(ordersMapper.selectList(wrapper));
     }
 
+    @Transactional
     @PutMapping("/orders/{id}/status")
     public ApiResponse<Void> updateOrderStatus(@PathVariable Long id, @RequestParam Integer status) {
         OrdersEntity order = ordersMapper.selectById(id);
@@ -519,8 +516,9 @@ public class MerchantAdminController {
     public ApiResponse<List<DishesTableEntity>> getTables() {
         List<DishesTableEntity> tables = tableMapper.selectList(
                 new LambdaQueryWrapper<DishesTableEntity>()
-                        .orderByAsc(DishesTableEntity::getArea)
                         .orderByAsc(DishesTableEntity::getNumber));
+        tables.forEach(table -> syncTableStatusFromActiveOrders(table, hasActiveAmount(table)));
+        tables.forEach(this::normalizeTableForDisplay);
         return ApiResponse.ok("获取桌台成功", tables);
     }
 
@@ -529,9 +527,12 @@ public class MerchantAdminController {
     public ApiResponse<List<DishesTableEntity>> getTablesForCustomer() {
         List<DishesTableEntity> tables = tableMapper.selectList(
                 new LambdaQueryWrapper<DishesTableEntity>()
-                        .eq(DishesTableEntity::getStatus, TABLE_STATUS_IDLE)
-                        .orderByAsc(DishesTableEntity::getArea)
                         .orderByAsc(DishesTableEntity::getNumber));
+        tables.forEach(table -> syncTableStatusFromActiveOrders(table, hasActiveAmount(table)));
+        tables.forEach(this::normalizeTableForDisplay);
+        tables = tables.stream()
+                .filter(table -> table.getStatus() != null && table.getStatus() == TABLE_STATUS_IDLE)
+                .collect(Collectors.toList());
         return ApiResponse.ok("获取桌台成功", tables);
     }
 
@@ -547,6 +548,7 @@ public class MerchantAdminController {
         table.setStatus(status);
         if (shouldClearTableAmount(status)) {
             table.setAmount(BigDecimal.ZERO);
+            table.setOccupiedBy(null);
         }
         tableMapper.updateById(table);
         return ApiResponse.ok("桌台已设为" + resolveTableStatusLabel(status), null);
@@ -562,6 +564,11 @@ public class MerchantAdminController {
         if (table.getAmount() == null) {
             table.setAmount(BigDecimal.ZERO);
         }
+        if (table.getStatus() == TABLE_STATUS_IDLE || table.getStatus() == TABLE_STATUS_REPAIR) {
+            table.setOccupiedBy(null);
+        }
+        table.setArea(null);
+        table.setMinSpend(BigDecimal.ZERO);
         table.setCreateTime(LocalDateTime.now());
         tableMapper.insert(table);
         return ApiResponse.ok("新增成功", null);
@@ -575,8 +582,8 @@ public class MerchantAdminController {
         }
         table.setNumber(request.getNumber());
         table.setPersonNumber(request.getPersonNumber());
-        table.setArea(request.getArea());
-        table.setMinSpend(request.getMinSpend());
+        table.setArea(null);
+        table.setMinSpend(BigDecimal.ZERO);
         if (request.getStatus() != null) {
             if (!isValidTableStatus(request.getStatus())) {
                 return ApiResponse.fail("桌台状态不合法");
@@ -584,6 +591,7 @@ public class MerchantAdminController {
             table.setStatus(request.getStatus());
             if (shouldClearTableAmount(request.getStatus())) {
                 table.setAmount(BigDecimal.ZERO);
+                table.setOccupiedBy(null);
             }
         }
         tableMapper.updateById(table);
@@ -810,13 +818,38 @@ public class MerchantAdminController {
     }
 
     private boolean isValidTableStatus(Integer status) {
-        return status != null && status >= TABLE_STATUS_IDLE && status <= TABLE_STATUS_REPAIR;
+        return status != null && (status == TABLE_STATUS_IDLE
+                || status == TABLE_STATUS_SEATED
+                || status == TABLE_STATUS_REPAIR);
     }
 
     private boolean shouldClearTableAmount(Integer status) {
         return status != null && (status == TABLE_STATUS_IDLE
-                || status == TABLE_STATUS_BOOKED
                 || status == TABLE_STATUS_REPAIR);
+    }
+
+    private boolean hasActiveAmount(DishesTableEntity table) {
+        return table != null
+                && table.getAmount() != null
+                && table.getAmount().compareTo(BigDecimal.ZERO) > 0;
+    }
+
+    private void normalizeTableForDisplay(DishesTableEntity table) {
+        if (table == null) {
+            return;
+        }
+        table.setStatus(normalizeTableStatus(table.getStatus()));
+        table.setArea(null);
+    }
+
+    private Integer normalizeTableStatus(Integer status) {
+        if (status == null || status == TABLE_STATUS_IDLE) {
+            return TABLE_STATUS_IDLE;
+        }
+        if (status == TABLE_STATUS_REPAIR) {
+            return TABLE_STATUS_REPAIR;
+        }
+        return TABLE_STATUS_SEATED;
     }
 
     private String resolveTableStatusLabel(Integer status) {
@@ -828,38 +861,84 @@ public class MerchantAdminController {
                 return "空闲";
             case TABLE_STATUS_SEATED:
                 return "已入座";
-            case TABLE_STATUS_DINING:
-                return "就餐中";
-            case TABLE_STATUS_ORDERED:
-                return "已下单";
-            case TABLE_STATUS_PENDING:
-                return "待结账";
-            case TABLE_STATUS_BOOKED:
-                return "预订中";
             case TABLE_STATUS_REPAIR:
                 return "维修中";
             default:
-                return "未知";
+                return "已入座";
         }
     }
 
     private void syncTableStatusWithOrder(OrdersEntity order, Integer orderStatus) {
-        if (order == null || order.getTableId() == null || orderStatus == null) {
+        if (order == null || orderStatus == null) {
             return;
         }
-        DishesTableEntity table = tableMapper.selectById(order.getTableId());
+        DishesTableEntity table = resolveOrderTable(order);
         if (table == null || (table.getStatus() != null && table.getStatus() == TABLE_STATUS_REPAIR)) {
             return;
         }
-        if (orderStatus == 2) {
-            table.setStatus(TABLE_STATUS_ORDERED);
-        } else if (orderStatus == 3) {
-            table.setStatus(TABLE_STATUS_DINING);
-        } else if (orderStatus == 4 || orderStatus == 5) {
-            table.setStatus(TABLE_STATUS_IDLE);
-            table.setAmount(BigDecimal.ZERO);
+        syncTableStatusFromActiveOrders(table, true);
+    }
+
+    private DishesTableEntity resolveOrderTable(OrdersEntity order) {
+        if (order == null) {
+            return null;
         }
+        if (order.getTableId() != null) {
+            DishesTableEntity table = tableMapper.selectById(order.getTableId());
+            if (table != null) {
+                return table;
+            }
+        }
+        String tableNumber = normalizeOptionalText(order.getTableNumber());
+        if (tableNumber == null) {
+            return null;
+        }
+        return tableMapper.selectOne(new LambdaQueryWrapper<DishesTableEntity>()
+                .eq(DishesTableEntity::getNumber, tableNumber)
+                .last("LIMIT 1"));
+    }
+
+    private void syncTableStatusFromActiveOrders(DishesTableEntity table, boolean releaseWhenNoActiveOrder) {
+        if (table == null || (table.getStatus() != null && table.getStatus() == TABLE_STATUS_REPAIR)) {
+            return;
+        }
+        List<OrdersEntity> activeOrders = selectActiveOrdersForTable(table);
+        if (activeOrders.isEmpty()) {
+            if (releaseWhenNoActiveOrder) {
+                table.setStatus(TABLE_STATUS_IDLE);
+                table.setAmount(BigDecimal.ZERO);
+                table.setOccupiedBy(null);
+                tableMapper.updateById(table);
+            }
+            return;
+        }
+
+        BigDecimal activeAmount = activeOrders.stream()
+                .map(OrdersEntity::getTotalPrice)
+                .filter(amount -> amount != null)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        table.setStatus(TABLE_STATUS_SEATED);
+        table.setAmount(activeAmount);
+        table.setOccupiedBy(activeOrders.get(0).getUserId());
         tableMapper.updateById(table);
+    }
+
+    private List<OrdersEntity> selectActiveOrdersForTable(DishesTableEntity table) {
+        LambdaQueryWrapper<OrdersEntity> wrapper = new LambdaQueryWrapper<OrdersEntity>()
+                .in(OrdersEntity::getStatus, ACTIVE_ORDER_STATUSES);
+        String tableNumber = normalizeOptionalText(table.getNumber());
+        if (table.getId() != null && tableNumber != null) {
+            wrapper.and(q -> q.eq(OrdersEntity::getTableId, table.getId())
+                    .or()
+                    .eq(OrdersEntity::getTableNumber, tableNumber));
+        } else if (table.getId() != null) {
+            wrapper.eq(OrdersEntity::getTableId, table.getId());
+        } else if (tableNumber != null) {
+            wrapper.eq(OrdersEntity::getTableNumber, tableNumber);
+        } else {
+            return List.of();
+        }
+        return ordersMapper.selectList(wrapper);
     }
 
     private String normalizeOptionalText(String value) {
@@ -877,7 +956,6 @@ public class MerchantAdminController {
         dish.setCoverUrl(request.getCoverUrl());
         dish.setStatus(request.getStatus() != null ? request.getStatus() : 1);
         dish.setStock(request.getStock() != null ? request.getStock() : 999);
-        dish.setMemberPrice(request.getMemberPrice());
         dish.setSpecs(buildSpecsJson(request));
         dish.setIsRecommend(request.getIsRecommend() != null ? request.getIsRecommend() : 0);
         dish.setRecommendIds(normalizeOptionalText(request.getRecommendIds()));
@@ -907,7 +985,6 @@ public class MerchantAdminController {
         d.setCoverUrl(dish.getCoverUrl());
         d.setStatus(dish.getStatus());
         d.setStock(dish.getStock());
-        d.setMemberPrice(dish.getMemberPrice());
         d.setSpecs(dish.getSpecs());
         d.setIsRecommend(dish.getIsRecommend() != null ? dish.getIsRecommend() : 0);
         d.setRecommendIds(dish.getRecommendIds());

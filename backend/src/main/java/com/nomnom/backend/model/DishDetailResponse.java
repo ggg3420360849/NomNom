@@ -2,7 +2,6 @@ package com.nomnom.backend.model;
 
 import com.nomnom.backend.entity.DishesPackageEntity;
 
-import java.math.BigDecimal;
 import java.util.Date;
 import java.util.List;
 
@@ -15,7 +14,6 @@ public class DishDetailResponse {
     private String coverUrl;
     private Integer status;
     private Integer stock;
-    private BigDecimal memberPrice;
     private String specs;
     private Integer isRecommend;
     private String recommendIds;
@@ -42,9 +40,6 @@ public class DishDetailResponse {
 
     public Integer getStock() { return stock; }
     public void setStock(Integer stock) { this.stock = stock; }
-
-    public BigDecimal getMemberPrice() { return memberPrice; }
-    public void setMemberPrice(BigDecimal memberPrice) { this.memberPrice = memberPrice; }
 
     public String getSpecs() { return specs; }
     public void setSpecs(String specs) { this.specs = specs; }

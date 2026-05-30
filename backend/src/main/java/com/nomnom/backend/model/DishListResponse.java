@@ -14,7 +14,6 @@ public class DishListResponse {
     private Integer status;
     private Integer stock;
     private BigDecimal price;
-    private BigDecimal memberPrice;
     private String specs;
     private Integer isRecommend;
     private String recommendIds;
@@ -46,9 +45,6 @@ public class DishListResponse {
 
     public BigDecimal getPrice() { return price; }
     public void setPrice(BigDecimal price) { this.price = price; }
-
-    public BigDecimal getMemberPrice() { return memberPrice; }
-    public void setMemberPrice(BigDecimal memberPrice) { this.memberPrice = memberPrice; }
 
     public String getSpecs() { return specs; }
     public void setSpecs(String specs) { this.specs = specs; }

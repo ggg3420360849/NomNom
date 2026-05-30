@@ -261,14 +261,14 @@ ALTER TABLE shopping_car ADD COLUMN dishes_id INT COMMENT '菜品ID，冗余字�
 -- 4. 升级菜品评价表：增加 orders_id 关联订单
 ALTER TABLE dishes_evaluations ADD COLUMN orders_id INT COMMENT '关联订单ID，防止刷评';
 
--- 1. 升级桌台表：增加区域、当前消费金额、最低消费
-ALTER TABLE dishes_table ADD COLUMN area VARCHAR(50) COMMENT '所属区域：大厅/包间/二楼等';
+-- 1. 升级桌台表：保留区域兼容字段、增加当前消费金额、最低消费
+ALTER TABLE dishes_table ADD COLUMN area VARCHAR(50) COMMENT '桌台区域兼容字段';
 ALTER TABLE dishes_table ADD COLUMN amount DECIMAL(10, 2) DEFAULT 0.00 COMMENT '当前桌台消费总额';
-ALTER TABLE dishes_table ADD COLUMN min_spend DECIMAL(10, 2) DEFAULT 0.00 COMMENT '最低消费(主要针对包间)';
+ALTER TABLE dishes_table ADD COLUMN min_spend DECIMAL(10, 2) DEFAULT 0.00 COMMENT '最低消费';
+ALTER TABLE dishes_table ADD COLUMN occupied_by INT COMMENT '当前占用用户ID';
 
--- 2. 升级菜品表：增加库存、会员价、多规格JSON配置
+-- 2. 升级菜品表：增加库存、多规格JSON配置
 ALTER TABLE dishes ADD COLUMN stock INT DEFAULT 999 COMMENT '库存数量';
-ALTER TABLE dishes ADD COLUMN member_price DECIMAL(10, 2) COMMENT '会员特价';
 ALTER TABLE dishes ADD COLUMN specs TEXT COMMENT '菜品规格口味，存储为JSON字符串';
 
 -- 5. 升级菜品表：增加推荐字段

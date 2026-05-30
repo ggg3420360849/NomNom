@@ -28,7 +28,7 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/cart/**", "/api/collection/**",
                         "/api/messages/**", "/api/refunds/**",
                         "/api/wallet/**", "/api/evaluations/**",
-                        "/api/customer/**")
+                        "/api/customer/**", "/api/tables/**")
                 .excludePathPatterns("/api/evaluations/dish/**", "/api/customer/tables");
     }
 

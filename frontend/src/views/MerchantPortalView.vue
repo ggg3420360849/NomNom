@@ -16,7 +16,7 @@ function switchTab(tab) {
   currentMenu.value = tab
   localStorage.setItem('adminTab', tab)
   if (tab === 'B01') subTab.value = 'list'
-  if (tab === 'B02') subTab.value = 'layout'
+  if (tab === 'B02') { subTab.value = 'layout'; fetchTables(); }
   if (tab === 'B03') { b03SubTab.value = 'orders'; fetchOrders(); fetchAudits(); fetchReconciliation(); }
   if (tab === 'B04') { subTab.value = 'reviews'; fetchReviews(); fetchStats(); }
 }
@@ -36,10 +36,6 @@ function getErrorMessage(err, fallback = '操作失败') {
 const TABLE_STATUS = {
   0: { label: '空闲', class: 'status-idle', color: '#689f38' },
   1: { label: '已入座', class: 'status-seated', color: '#f57c00' },
-  2: { label: '就餐中', class: 'status-dining', color: '#fbc02d' },
-  3: { label: '已下单', class: 'status-ordered', color: '#e64a19' },
-  4: { label: '待结账', class: 'status-pending', color: '#d32f2f' },
-  5: { label: '预订中', class: 'status-booked', color: '#7b1fa2' },
   6: { label: '维修中', class: 'status-repair', color: '#795548' }
 }
 const TABLE_STATUS_OPTIONS = Object.entries(TABLE_STATUS).map(([value, meta]) => ({
@@ -51,15 +47,19 @@ function tableStatus(status) {
   return TABLE_STATUS[status] || { label: '未知', class: 'status-unknown', color: '#9e9e9e' }
 }
 
-const selectedArea = ref('全部')
 const tableList = ref([])
 const tableLoading = ref(false)
-const tableAreas = ref([])
+
+function normalizeTableStatus(status) {
+  const value = Number(status ?? 0)
+  if (value === 0 || value === 1 || value === 6) return value
+  return 1
+}
 
 function formatTable(raw) {
   return {
     id: raw.id, number: raw.number, name: (raw.personNumber || 2) + '人桌',
-    seats: raw.personNumber || 2, area: raw.area || '大厅', status: Number(raw.status ?? 0),
+    seats: raw.personNumber || 2, status: normalizeTableStatus(raw.status),
     amount: Number(raw.amount || 0), minSpend: Number(raw.minSpend || 0),
   }
 }
@@ -69,27 +69,23 @@ async function fetchTables() {
   try {
     const res = await merchantApi.getTables()
     tableList.value = (res.data?.data || res.data || []).map(formatTable)
-    tableAreas.value = [...new Set(tableList.value.map(t => t.area))]
   } catch (err) {} finally { tableLoading.value = false }
 }
 
-const filteredTables = computed(() => {
-  if (selectedArea.value === '全部') return tableList.value
-  return tableList.value.filter(t => t.area === selectedArea.value)
-})
+const filteredTables = computed(() => tableList.value)
 
 // === 菜品管理 ===
 const showDishModal = ref(false)
 const editingId = ref(null)
 const dishList = ref([])
 const dishForm = reactive({
-  name: '', type_id: null, price: 0, memberPrice: 0, stock: 99, status: 1, cover_url: '', isRecommend: 0,
+  name: '', type_id: null, price: 0, stock: 99, status: 1, cover_url: '', isRecommend: 0,
   recommend_ids: []
 })
 
 function resetDishForm() {
   Object.assign(dishForm, {
-    name: '', type_id: null, price: 0, memberPrice: 0, stock: 99, status: 1, cover_url: '', isRecommend: 0,
+    name: '', type_id: null, price: 0, stock: 99, status: 1, cover_url: '', isRecommend: 0,
     recommend_ids: []
   })
 }
@@ -116,7 +112,7 @@ function openEditModal(dish) {
   }
 
   Object.assign(dishForm, {
-    name: dish.name || '', type_id: dish.typeId || null, price: dish.price || 0, memberPrice: dish.memberPrice || 0,
+    name: dish.name || '', type_id: dish.typeId || null, price: dish.price || 0,
     stock: dish.stock || 99, status: dish.status ?? 1, cover_url: dish.coverUrl || '', isRecommend: dish.isRecommend || 0,
     recommend_ids: parsedRecs // 绑定解析出来的真实数组，复选框就会自动亮起！
   })
@@ -191,7 +187,6 @@ const saveDish = async () => {
     // ★ 核心修复点 2：在保存给后端前，把数组转换成字符串 ★
     const payload = { ...dishForm }
     payload.price = Number(dishForm.price || 0)
-    payload.memberPrice = Number(dishForm.memberPrice || 0)
     payload.stock = Number(dishForm.stock || 0)
     payload.recommendIds = JSON.stringify(dishForm.recommend_ids)
 
@@ -294,7 +289,13 @@ function switchB04SubTab(tab) {
 
 async function changeOrderStatus(order, nextStatus) {
   if (!nextStatus) return
-  try { await merchantApi.updateOrderStatus(order.id, nextStatus); await fetchOrders(); await loadMessages(); showToast('订单状态已更新') } catch (err) { showToast(getErrorMessage(err, '状态更新失败')) }
+  try {
+    await merchantApi.updateOrderStatus(order.id, nextStatus)
+    await fetchOrders()
+    await fetchTables()
+    await loadMessages()
+    showToast('订单状态已更新，桌台状态已自动同步')
+  } catch (err) { showToast(getErrorMessage(err, '状态更新失败')) }
 }
 async function cleanupInvalidOrders() {
   if (!window.confirm('确认清理空金额、无用户、无明细等异常订单吗？')) return
@@ -303,6 +304,7 @@ async function cleanupInvalidOrders() {
     const data = res.data?.data || {}
     showToast(`已清理 ${data.deletedOrders || 0} 个异常订单`)
     await fetchOrders()
+    await fetchTables()
   } catch (err) {
     showToast(getErrorMessage(err, '清理失败'))
   }
@@ -313,6 +315,7 @@ async function handleAuditAction(id, isPass) {
     showToast(isPass ? '审批已通过' : '申请已驳回')
     await fetchAudits()
     await fetchReconciliation()
+    await fetchTables()
     await loadMessages()
   } catch (err) {
     showToast(getErrorMessage(err, '审批失败'))
@@ -340,10 +343,10 @@ async function submitAuditReject() {
   }
 }
 
-const tableForm = reactive({ number: '', personNumber: 2, area: '大厅', minSpend: 0, status: 0 })
+const tableForm = reactive({ number: '', personNumber: 2, minSpend: 0, status: 0 })
 const showTableForm = ref(false); const editingTableId = ref(null);
-function openAddTable() { editingTableId.value = null; Object.assign(tableForm, { number: '', personNumber: 2, area: '大厅', minSpend: 0, status: 0 }); showTableForm.value = true; }
-function openEditTable(table) { editingTableId.value = table.id; Object.assign(tableForm, { number: table.number, personNumber: table.seats, area: table.area, minSpend: table.minSpend || 0, status: table.status }); showTableForm.value = true }
+function openAddTable() { editingTableId.value = null; Object.assign(tableForm, { number: '', personNumber: 2, minSpend: 0, status: 0 }); showTableForm.value = true; }
+function openEditTable(table) { editingTableId.value = table.id; Object.assign(tableForm, { number: table.number, personNumber: table.seats, minSpend: table.minSpend || 0, status: table.status }); showTableForm.value = true }
 async function saveTable() { try { if (editingTableId.value) await merchantApi.updateTable(editingTableId.value, tableForm); else await merchantApi.addTable(tableForm); showTableForm.value = false; await fetchTables(); } catch { } }
 async function removeTable(table) { try { await merchantApi.deleteTable(table.id); await fetchTables(); } catch { } }
 
@@ -432,11 +435,10 @@ onUnmounted(() => {
 
           <table v-if="subTab === 'list'" class="biz-table">
             <thead>
-            <tr><th width="40"><input type="checkbox" /></th><th>菜品信息</th><th>分类</th><th>售价/会员价</th><th>属性标</th><th>状态</th><th>操作</th></tr>
+            <tr><th>菜品信息</th><th>分类</th><th>售价</th><th>属性标</th><th>状态</th><th>操作</th></tr>
             </thead>
             <tbody>
             <tr v-for="item in dishList" :key="item.id">
-              <td><input type="checkbox" /></td>
               <td>
                 <div class="dish-info">
                   <img :src="item.coverUrl || item.cover_url || '/placeholder.png'" class="dish-img" />
@@ -446,7 +448,6 @@ onUnmounted(() => {
               <td>{{ item.typeName || '-' }}</td>
               <td>
                 <p class="sell-price">￥{{ Number(item.price || 0).toFixed(2) }}</p>
-                <p class="member-price">会员: ￥{{ Number(item.memberPrice || 0).toFixed(2) }}</p>
               </td>
               <td>
                 <span v-if="item.isRecommend === 1" class="chip chip-orange">👍店长推荐</span>
@@ -536,12 +537,11 @@ onUnmounted(() => {
             <button class="btn-primary" @click="openAddTable" style="padding:6px 16px">+ 新增桌台</button>
           </div>
           <div class="table-tool-bar">
-            <div class="area-filters"><button v-for="a in ['全部', ...tableAreas]" :key="a" :class="{ active: selectedArea === a }" @click="selectedArea = a">{{ a }}</button></div>
             <div class="status-legends"><span v-for="(v, k) in TABLE_STATUS" :key="k"><i :style="{ backgroundColor: v.color }"></i> {{ v.label }}</span></div>
           </div>
           <div class="visual-grid">
             <div v-for="table in filteredTables" :key="table.id" class="table-card" :class="tableStatus(table.status).class">
-              <div class="card-top"><span class="t-no">{{ table.number }}</span><span class="t-area">{{ table.area }}</span></div>
+              <div class="card-top"><span class="t-no">{{ table.number }}</span></div>
               <div class="card-mid">
                 <p class="t-seats">{{ table.seats }} 人桌</p>
                 <p v-if="table.amount > 0" class="t-amount">￥{{ table.amount.toFixed(2) }}</p>
@@ -713,7 +713,6 @@ onUnmounted(() => {
           <div class="form-grid">
             <div class="form-group"><label>桌号</label><input v-model="tableForm.number" /></div>
             <div class="form-group"><label>人数</label><input type="number" v-model.number="tableForm.personNumber" /></div>
-            <div class="form-group"><label>区域</label><input v-model="tableForm.area" /></div>
             <div class="form-group">
               <label>桌台状态</label>
               <select v-model.number="tableForm.status">
@@ -838,11 +837,8 @@ onUnmounted(() => {
 .tab-triggers span { padding: 12px 0; cursor: pointer; position: relative; font-weight: 500; color: #8d6e63; }
 .tab-triggers span.active { color: #f57c00; }
 .tab-triggers span.active::after { content: ''; position: absolute; bottom: -1px; left: 0; width: 100%; height: 2px; background: #f57c00; }
-.table-tool-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.table-tool-bar { display: flex; justify-content: flex-end; align-items: center; margin-bottom: 16px; }
 .table-actions { display: flex; justify-content: flex-end; margin-bottom: 12px; }
-.area-filters { display: flex; gap: 8px; }
-.area-filters button { border: 1px solid #e0d4c3; padding: 5px 16px; border-radius: 6px; background: white; color:#5d4037; cursor: pointer; transition: 0.2s;}
-.area-filters button.active { background: #f57c00; color: white; border-color: #f57c00; box-shadow: 0 2px 6px rgba(245, 124, 0, 0.2);}
 .status-legends { display: flex; gap: 12px; font-size: 12px; color: #5d4037;}
 .status-legends i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
 .biz-table { width: 100%; border-collapse: collapse; }
@@ -852,7 +848,6 @@ onUnmounted(() => {
 .dish-img { width: 48px; height: 48px; border-radius: 6px; object-fit: cover; }
 .dish-name { font-weight: bold; margin: 0; }
 .sell-price { color: #d84315; font-weight: bold; margin: 0; font-size: 16px;}
-.member-price { font-size: 12px; color: #8d6e63; margin: 0; }
 .chip { padding: 4px 10px; border-radius: 12px; font-size: 12px; display: inline-block;}
 .chip-green { background: #f1f8e9; color: #558b2f; border: 1px solid #c5e1a5; }
 .chip-gray { background: #f5f5f5; color: #9e9e9e; border: 1px solid #eeeeee; }
@@ -862,15 +857,10 @@ onUnmounted(() => {
 .table-card:hover { transform: translateY(-4px); box-shadow: 0 10px 20px rgba(121, 85, 72, 0.1); }
 .status-idle { background: #f1f8e9; border-top-color: #7cb342; }
 .status-seated { background: #fff3e0; border-top-color: #ff9800; }
-.status-dining { background: #fffde7; border-top-color: #fbc02d; }
-.status-ordered { background: #fbe9e7; border-top-color: #ff5722; }
-.status-pending { background: #ffebee; border-top-color: #e53935; }
-.status-booked { background: #f3e5f5; border-top-color: #8e24aa; }
 .status-repair { background: #efebe9; border-top-color: #795548; }
 .status-unknown { background: #f5f5f5; border-top-color: #9e9e9e; }
-.card-top { display: flex; justify-content: space-between; margin-bottom: 12px; color: #4e342e;}
+.card-top { display: flex; justify-content: center; margin-bottom: 12px; color: #4e342e;}
 .t-no { font-size: 20px; font-weight: bold; }
-.t-area { font-size: 12px; opacity: 0.7; }
 .card-mid { flex: 1; text-align: center; }
 .t-seats { color: #8d6e63; font-size: 14px; }
 .t-amount { color: #d32f2f; font-size: 18px; font-weight: bold; }

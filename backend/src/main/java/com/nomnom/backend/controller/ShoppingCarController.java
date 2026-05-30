@@ -28,28 +28,33 @@ public class ShoppingCarController {
     @PostMapping
     public ApiResponse<Void> add(@RequestBody Map<String, Object> body, HttpServletRequest request) {
         Long userId = (Long) request.getAttribute("userId");
-        Long dishesId = Long.valueOf(body.get("dishes_id").toString());
-        Long packageId = Long.valueOf(body.get("package_id").toString());
-        Integer buyNumber = Integer.valueOf(body.getOrDefault("buy_number", 1).toString());
+        Long dishesId = parseRequiredLong(body, "dishes_id", "菜品不能为空");
+        Long packageId = parseRequiredLong(body, "package_id", "菜品套餐不能为空");
+        Integer buyNumber = parseOptionalInteger(body, "buy_number", 1, "购买数量不合法");
         shoppingCarService.addItem(userId, dishesId, packageId, buyNumber);
         return ApiResponse.ok("已加入购物车", null);
     }
 
     @PutMapping("/{id}/quantity")
-    public ApiResponse<Void> updateQuantity(@PathVariable Long id, @RequestParam Integer buyNumber) {
-        shoppingCarService.updateQuantity(id, buyNumber);
+    public ApiResponse<Void> updateQuantity(@PathVariable Long id,
+                                            @RequestParam Integer buyNumber,
+                                            HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute("userId");
+        shoppingCarService.updateQuantity(userId, id, buyNumber);
         return ApiResponse.ok("更新成功", null);
     }
 
     @PutMapping("/{id}/selected")
-    public ApiResponse<Void> toggleSelected(@PathVariable Long id) {
-        shoppingCarService.toggleSelected(id);
+    public ApiResponse<Void> toggleSelected(@PathVariable Long id, HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute("userId");
+        shoppingCarService.toggleSelected(userId, id);
         return ApiResponse.ok("ok", null);
     }
 
     @DeleteMapping("/{id}")
-    public ApiResponse<Void> remove(@PathVariable Long id) {
-        shoppingCarService.removeItem(id);
+    public ApiResponse<Void> remove(@PathVariable Long id, HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute("userId");
+        shoppingCarService.removeItem(userId, id);
         return ApiResponse.ok("已移除", null);
     }
 
@@ -58,5 +63,29 @@ public class ShoppingCarController {
         Long userId = (Long) request.getAttribute("userId");
         shoppingCarService.clearCart(userId);
         return ApiResponse.ok("已清空", null);
+    }
+
+    private Long parseRequiredLong(Map<String, Object> body, String key, String message) {
+        Object raw = body != null ? body.get(key) : null;
+        if (raw == null || raw.toString().trim().isEmpty()) {
+            throw new IllegalArgumentException(message);
+        }
+        try {
+            return Long.valueOf(raw.toString().trim());
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(message);
+        }
+    }
+
+    private Integer parseOptionalInteger(Map<String, Object> body, String key, Integer fallback, String message) {
+        Object raw = body != null ? body.get(key) : null;
+        if (raw == null || raw.toString().trim().isEmpty()) {
+            return fallback;
+        }
+        try {
+            return Integer.valueOf(raw.toString().trim());
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(message);
+        }
     }
 }

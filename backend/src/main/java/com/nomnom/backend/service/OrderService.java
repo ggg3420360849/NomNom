@@ -1,5 +1,6 @@
 package com.nomnom.backend.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.nomnom.backend.entity.OrdersEntity;
 import com.nomnom.backend.entity.OrdersItemEntity;
 import com.nomnom.backend.entity.DishesEntity;
@@ -39,7 +40,9 @@ public class OrderService {
     private static final int ROLE_MERCHANT = 2;
     private static final int MESSAGE_TYPE_ORDER = 2;
     private static final int TABLE_STATUS_IDLE = 0;
-    private static final int TABLE_STATUS_ORDERED = 3;
+    private static final int TABLE_STATUS_SEATED = 1;
+    private static final int TABLE_STATUS_REPAIR = 6;
+    private static final List<Integer> ACTIVE_ORDER_STATUSES = List.of(1, 2, 3);
 
     private final OrderReadMapper orderReadMapper;
     private final PackageReadMapper packageReadMapper;
@@ -133,7 +136,7 @@ public class OrderService {
         }
 
         deductStock(resolvedOrder.lines);
-        updateTableAfterPayment(table, resolvedOrder.totalAmount);
+        updateTableAfterPayment(table, resolvedOrder.totalAmount, request.getUserId());
         messagesService.createMessage(request.getUserId(),
                 "订单 " + order.getCode() + " 已支付成功，订单完成后可在我的订单中评价菜品。",
                 MESSAGE_TYPE_ORDER);
@@ -216,10 +219,19 @@ public class OrderService {
             throw new IllegalArgumentException("桌台不存在。");
         }
         Integer status = table.getStatus() != null ? table.getStatus() : TABLE_STATUS_IDLE;
-        if (status != TABLE_STATUS_IDLE) {
-            throw new IllegalArgumentException("桌台当前为" + resolveTableStatusLabel(status) + "，请选择空闲桌台。");
+        if (status == TABLE_STATUS_REPAIR) {
+            throw new IllegalArgumentException("桌台维修中，请选择其他桌台。");
         }
-        return table;
+        if (status == TABLE_STATUS_IDLE) {
+            return table;
+        }
+        if (status == TABLE_STATUS_SEATED && isTableOccupiedByCurrentUser(table, request.getUserId())) {
+            return table;
+        }
+        if (status == TABLE_STATUS_SEATED) {
+            throw new IllegalArgumentException("桌台已被其他顾客占用，请选择空闲桌台。");
+        }
+        throw new IllegalArgumentException("桌台当前为" + resolveTableStatusLabel(status) + "，请选择空闲桌台。");
     }
 
     private void deductStock(List<ResolvedOrderLine> lines) {
@@ -245,14 +257,44 @@ public class OrderService {
         }
     }
 
-    private void updateTableAfterPayment(DishesTableEntity table, BigDecimal amount) {
+    private void updateTableAfterPayment(DishesTableEntity table, BigDecimal amount, Long userId) {
         if (table == null) {
             return;
         }
         BigDecimal current = table.getAmount() != null ? table.getAmount() : BigDecimal.ZERO;
         table.setAmount(current.add(amount));
-        table.setStatus(TABLE_STATUS_ORDERED);
+        table.setStatus(TABLE_STATUS_SEATED);
+        table.setOccupiedBy(userId);
         tableMapper.updateById(table);
+    }
+
+    private boolean isTableOccupiedByCurrentUser(DishesTableEntity table, Long userId) {
+        if (table == null || userId == null) {
+            return false;
+        }
+        if (table.getOccupiedBy() != null && table.getOccupiedBy().equals(userId)) {
+            return true;
+        }
+        return hasActiveOrderForCurrentUser(table, userId);
+    }
+
+    private boolean hasActiveOrderForCurrentUser(DishesTableEntity table, Long userId) {
+        LambdaQueryWrapper<OrdersEntity> wrapper = new LambdaQueryWrapper<OrdersEntity>()
+                .eq(OrdersEntity::getUserId, userId)
+                .in(OrdersEntity::getStatus, ACTIVE_ORDER_STATUSES);
+        String tableNumber = normalizeText(table.getNumber());
+        if (table.getId() != null && !tableNumber.isEmpty()) {
+            wrapper.and(q -> q.eq(OrdersEntity::getTableId, table.getId())
+                    .or()
+                    .eq(OrdersEntity::getTableNumber, tableNumber));
+        } else if (table.getId() != null) {
+            wrapper.eq(OrdersEntity::getTableId, table.getId());
+        } else if (!tableNumber.isEmpty()) {
+            wrapper.eq(OrdersEntity::getTableNumber, tableNumber);
+        } else {
+            return false;
+        }
+        return ordersMapper.selectCount(wrapper) > 0;
     }
 
     private String resolveTableStatusLabel(Integer status) {
@@ -262,20 +304,12 @@ public class OrderService {
         switch (status) {
             case TABLE_STATUS_IDLE:
                 return "空闲";
-            case 1:
+            case TABLE_STATUS_SEATED:
                 return "已入座";
-            case 2:
-                return "就餐中";
-            case TABLE_STATUS_ORDERED:
-                return "已下单";
-            case 4:
-                return "待结账";
-            case 5:
-                return "预订中";
-            case 6:
+            case TABLE_STATUS_REPAIR:
                 return "维修中";
             default:
-                return "未知状态";
+                return "已入座";
         }
     }
 

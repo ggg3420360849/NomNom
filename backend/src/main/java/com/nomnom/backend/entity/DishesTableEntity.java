@@ -19,6 +19,7 @@ public class DishesTableEntity {
     private String area;
     private BigDecimal amount;
     private BigDecimal minSpend;
+    private Long occupiedBy;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -43,4 +44,7 @@ public class DishesTableEntity {
 
     public BigDecimal getMinSpend() { return minSpend; }
     public void setMinSpend(BigDecimal minSpend) { this.minSpend = minSpend; }
+
+    public Long getOccupiedBy() { return occupiedBy; }
+    public void setOccupiedBy(Long occupiedBy) { this.occupiedBy = occupiedBy; }
 }

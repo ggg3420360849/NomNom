@@ -9,6 +9,9 @@ import axios from 'axios'
 const router = useRouter()
 const app = useNomNomApp()
 const http = axios.create({ baseURL: '/api', timeout: 10000 })
+const ENTRY_MODE_KEY = 'nomnom-customer-entry-mode'
+const TABLE_SELECTION_KEY = 'nomnom-selected-table'
+const ACTIVE_TABLE_ORDER_STATUSES = new Set(['PENDING_PAYMENT', 'PAID', 'PREPARING'])
 
 const wallet = ref(0)
 const rechargeVisible = ref(false)
@@ -26,6 +29,11 @@ const localMenuItems = ref([])
 const keyword = ref('')
 const tableList = ref([])
 const selectedTableId = ref(null)
+const selectedTableSnapshot = ref(null)
+const tableLoading = ref(false)
+const entryMode = ref(sessionStorage.getItem(ENTRY_MODE_KEY) || '')
+const modePickerVisible = ref(false)
+const tablePickerVisible = ref(false)
 const cart = ref([])
 const orderList = ref([])
 const collectionList = ref([])
@@ -47,7 +55,15 @@ let messageTimer = null
 
 const cartCount = computed(() => cart.value.reduce((s, i) => s + i.quantity, 0))
 const cartTotal = computed(() => Number(cart.value.reduce((s, i) => s + i.price * i.quantity, 0).toFixed(2)))
-const selectedTable = computed(() => tableList.value.find(t => t.id === selectedTableId.value))
+const selectedTable = computed(() => {
+  return tableList.value.find(t => Number(t.id) === Number(selectedTableId.value))
+      || selectedTableSnapshot.value
+})
+const tablePillText = computed(() => {
+  if (selectedTableId.value) return `桌台：${tableLabel(selectedTable.value)}`
+  if (entryMode.value === 'browse') return '单浏览：只看菜单'
+  return '桌台：未选择'
+})
 const showCart = computed(() => activeView.value !== 'orders' && cart.value.length > 0)
 const paidOrders = computed(() => orderList.value.filter(order => isPaidOrder(order.status)))
 const completedOrders = computed(() => orderList.value.filter(order => canEvaluateOrder(order.status)))
@@ -159,15 +175,168 @@ async function loadMenu() {
   }
 }
 
+function tableLabel(table) {
+  if (!table) return '未选择'
+  return `${table.number}号桌 · ${table.personNumber || 2}人`
+}
+
+function persistEntryMode(mode) {
+  entryMode.value = mode
+  if (mode) {
+    sessionStorage.setItem(ENTRY_MODE_KEY, mode)
+  } else {
+    sessionStorage.removeItem(ENTRY_MODE_KEY)
+  }
+}
+
+function openModePicker() {
+  if (restoreTableFromActiveOrder()) return
+  modePickerVisible.value = true
+  tablePickerVisible.value = false
+}
+
+async function chooseEntryMode(mode) {
+  persistEntryMode(mode)
+  modePickerVisible.value = false
+  if (mode === 'table') {
+    tablePickerVisible.value = true
+    await loadTables()
+    return
+  }
+  tablePickerVisible.value = false
+}
+
+function isActiveTableOrder(status) {
+  return ACTIVE_TABLE_ORDER_STATUSES.has(status)
+}
+
+function findActiveTableOrder(orders = orderList.value) {
+  return (orders || []).find(order => isActiveTableOrder(order.status) && Number(order.tableId))
+}
+
+function restoreTableFromActiveOrder(orders = orderList.value) {
+  const activeOrder = findActiveTableOrder(orders)
+  if (!activeOrder) return false
+
+  persistSelectedTable({
+    id: activeOrder.tableId,
+    number: activeOrder.tableNumber || selectedTableSnapshot.value?.number || String(activeOrder.tableId),
+    personNumber: selectedTableSnapshot.value?.personNumber || 2,
+    status: 1
+  }, 'active-order')
+  persistEntryMode('table')
+  modePickerVisible.value = false
+  tablePickerVisible.value = false
+  return true
+}
+
+function readStoredTable() {
+  try {
+    const raw = sessionStorage.getItem(TABLE_SELECTION_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function persistSelectedTable(table, source = 'manual') {
+  const id = Number(table.id || table.tableId)
+  const snapshot = {
+    id,
+    number: table.number || table.tableNumber || String(id),
+    personNumber: table.personNumber || 2,
+    status: 1,
+    source
+  }
+  selectedTableId.value = snapshot.id
+  selectedTableSnapshot.value = snapshot
+  sessionStorage.setItem(TABLE_SELECTION_KEY, JSON.stringify(snapshot))
+}
+
+function clearSelectedTable() {
+  selectedTableId.value = null
+  selectedTableSnapshot.value = null
+  sessionStorage.removeItem(TABLE_SELECTION_KEY)
+}
+
+async function releaseCurrentTable() {
+  if (!selectedTableId.value) return true
+  try {
+    await customerApi.releaseTable(selectedTableId.value)
+    clearSelectedTable()
+    return true
+  } catch (err) {
+    alert(err?.response?.data?.message || err?.message || '当前桌台不能释放')
+    return false
+  }
+}
+
 async function loadTables() {
+  tableLoading.value = true
   try {
     tableList.value = (await fetchAvailableTables()).filter(table => Number(table.status ?? 0) === 0)
-    if (!tableList.value.some(table => Number(table.id) === Number(selectedTableId.value))) {
-      selectedTableId.value = tableList.value.length > 0 ? tableList.value[0].id : null
+    if (restoreTableFromActiveOrder()) {
+      return
+    }
+    const storedTable = readStoredTable()
+    if (!selectedTableId.value && storedTable?.id && storedTable.source !== 'active-order') {
+      selectedTableId.value = Number(storedTable.id)
+      selectedTableSnapshot.value = storedTable
+      persistEntryMode('table')
+      tablePickerVisible.value = false
+    }
+    if (!selectedTableId.value && entryMode.value === 'table') {
+      tablePickerVisible.value = true
+    } else if (!selectedTableId.value && !entryMode.value) {
+      openModePicker()
     }
   } catch {
     tableList.value = []
-    selectedTableId.value = null
+    if (!selectedTableId.value && entryMode.value === 'table') {
+      tablePickerVisible.value = true
+    } else if (!selectedTableId.value && !entryMode.value) {
+      openModePicker()
+    }
+  } finally {
+    tableLoading.value = false
+  }
+}
+
+async function openTablePicker() {
+  persistEntryMode('table')
+  modePickerVisible.value = false
+  if (orderList.value.length === 0) {
+    await loadOrders()
+  }
+  if (restoreTableFromActiveOrder()) {
+    alert('你当前已有未完成订单，已自动回到原桌台；订单完成后再更换桌台。')
+    return
+  }
+  tablePickerVisible.value = true
+  await loadTables()
+}
+
+async function chooseTable(table) {
+  if (!table?.id) return
+  try {
+    await loadOrders()
+    const activeOrder = findActiveTableOrder()
+    if (activeOrder && Number(activeOrder.tableId) !== Number(table.id)) {
+      restoreTableFromActiveOrder()
+      alert(`你当前已有 ${activeOrder.tableNumber || activeOrder.tableId} 号桌的未完成订单，已自动回到原桌台。`)
+      return
+    }
+    if (selectedTableId.value && Number(selectedTableId.value) !== Number(table.id)) {
+      const released = await releaseCurrentTable()
+      if (!released) return
+    }
+    const res = await customerApi.seatTable(table.id)
+    persistSelectedTable(res.data?.data || table)
+    tablePickerVisible.value = false
+    await loadTables()
+  } catch (err) {
+    alert(err?.response?.data?.message || err?.message || '桌台选择失败，请重新选择')
+    await loadTables()
   }
 }
 
@@ -184,8 +353,16 @@ async function loadOrders() {
   try {
     const res = await customerApi.getOrders()
     orderList.value = res.data?.data || []
+    if (!restoreTableFromActiveOrder(orderList.value)) {
+      const storedTable = readStoredTable()
+      if (selectedTableSnapshot.value?.source === 'active-order' || storedTable?.source === 'active-order') {
+        clearSelectedTable()
+      }
+    }
+    return orderList.value
   } catch {
     orderList.value = []
+    return orderList.value
   }
 }
 
@@ -273,7 +450,18 @@ function updateQuantity(id, num) {
 async function handleSubmit() {
   if (cartCount.value === 0) return alert('购物车是空的！')
   if (wallet.value < cartTotal.value) return alert('余额不足，请先充值')
-  if (!selectedTableId.value) return alert('请选择桌台')
+  restoreTableFromActiveOrder()
+  if (!selectedTableId.value) {
+    await loadOrders()
+    restoreTableFromActiveOrder()
+  }
+  if (!selectedTableId.value) {
+    persistEntryMode('table')
+    modePickerVisible.value = false
+    tablePickerVisible.value = true
+    await loadTables()
+    return alert('请先选择桌台')
+  }
 
   try {
     const res = await customerApi.createOrder({
@@ -444,20 +632,34 @@ function messageTypeText(type) {
 }
 
 async function exitPortal() {
+  if (orderList.value.length === 0) {
+    await loadOrders()
+  }
+  if (selectedTableId.value && !findActiveTableOrder()) {
+    try {
+      await customerApi.releaseTable(selectedTableId.value)
+    } catch {}
+  }
+  clearSelectedTable()
+  persistEntryMode('')
   app.logout()
   await router.push('/login')
 }
 
-onMounted(() => {
+onMounted(async () => {
   app.loadPortalData()
   loadCategory()
   loadMenu()
-  loadTables()
   loadWallet()
-  loadOrders()
   loadCollections()
   loadMyEvaluations()
   loadMessages()
+  await loadOrders()
+  if (selectedTableId.value || entryMode.value === 'table') {
+    await loadTables()
+  } else if (!entryMode.value) {
+    openModePicker()
+  }
   messageTimer = window.setInterval(loadMessages, 30000)
 })
 
@@ -480,16 +682,64 @@ onUnmounted(() => {
 
     <div class="wallet-bar">
       <span>余额：￥{{ wallet.toFixed(2) }}</span>
-      <select v-model.number="selectedTableId" class="table-select">
-        <option :value="null">选择桌台</option>
-        <option v-for="table in tableList" :key="table.id" :value="table.id">
-          {{ table.area || '大厅' }} · {{ table.number }}号桌 · {{ table.personNumber || 2 }}人
-        </option>
-      </select>
+      <div class="selected-table-pill" :class="{ empty: !selectedTableId && entryMode !== 'browse', browsing: !selectedTableId && entryMode === 'browse' }">
+        <span>{{ tablePillText }}</span>
+        <button type="button" @click="openTablePicker">{{ selectedTableId ? '换桌' : '去选桌' }}</button>
+      </div>
       <button class="message-toggle" @click="messagesVisible = !messagesVisible">
         消息<span v-if="unreadMessages > 0">{{ unreadMessages }}</span>
       </button>
       <button class="recharge-btn" @click="openRechargeDialog">充值</button>
+    </div>
+
+    <div v-if="modePickerVisible" class="table-first-overlay">
+      <section class="table-first-dialog entry-mode-dialog">
+        <div class="table-picker-head">
+          <div>
+            <p>进入方式</p>
+            <h2>请选择使用模式</h2>
+          </div>
+        </div>
+        <div class="entry-mode-grid">
+          <button type="button" class="entry-mode-card primary" @click="chooseEntryMode('table')">
+            <strong>桌台点餐</strong>
+            <span>先选择餐桌，点餐后订单会绑定当前桌台。</span>
+          </button>
+          <button type="button" class="entry-mode-card" @click="chooseEntryMode('browse')">
+            <strong>单浏览</strong>
+            <span>只看菜单和收藏，不占用桌台；提交订单前再选桌。</span>
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="tablePickerVisible" class="table-first-overlay">
+      <section class="table-first-dialog">
+        <div class="table-picker-head">
+          <div>
+            <p>欢迎光临</p>
+            <h2>请选择餐桌</h2>
+          </div>
+          <div class="table-picker-actions">
+            <button v-if="selectedTableId" type="button" @click="tablePickerVisible = false">返回</button>
+            <button type="button" @click="loadTables">刷新</button>
+          </div>
+        </div>
+        <div v-if="tableLoading" class="table-picker-empty">正在加载空闲桌台...</div>
+        <div v-else-if="tableList.length === 0" class="table-picker-empty">暂无空闲桌台，请联系服务员</div>
+        <div v-else class="table-choice-grid">
+          <button
+            v-for="table in tableList"
+            :key="table.id"
+            type="button"
+            class="table-choice"
+            @click="chooseTable(table)"
+          >
+            <strong>{{ table.number }}号桌</strong>
+            <span>{{ table.personNumber || 2 }}人</span>
+          </button>
+        </div>
+      </section>
     </div>
 
     <section v-if="messagesVisible" class="message-panel">
@@ -848,12 +1098,165 @@ onUnmounted(() => {
   border-bottom: 1px solid #eee;
   font-weight: bold;
 }
-.table-select {
+.selected-table-pill {
   flex: 1;
-  max-width: 320px;
-  padding: 6px 10px;
-  border: 1px solid #ddd;
+  max-width: 360px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px 6px 12px;
+  border: 1px solid #d9e6ff;
+  border-radius: 8px;
+  background: #f5f9ff;
+  color: #174f92;
+}
+.selected-table-pill.empty {
+  border-color: #ffd6d6;
+  background: #fff6f6;
+  color: #c73535;
+}
+.selected-table-pill.browsing {
+  border-color: #d8eadf;
+  background: #f4fbf6;
+  color: #2f6f43;
+}
+.selected-table-pill span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.selected-table-pill button {
+  border: none;
   border-radius: 6px;
+  background: #1890ff;
+  color: #fff;
+  padding: 5px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.table-first-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(20, 28, 38, 0.45);
+  backdrop-filter: blur(2px);
+}
+.table-first-dialog {
+  width: min(720px, 100%);
+  max-height: min(78vh, 640px);
+  overflow-y: auto;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.25);
+  padding: 24px;
+}
+.entry-mode-dialog {
+  width: min(620px, 100%);
+}
+.entry-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.entry-mode-card {
+  min-height: 138px;
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid #dbe4ef;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2937;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+}
+.entry-mode-card.primary {
+  border-color: #c9ddff;
+  background: #f6f9ff;
+}
+.entry-mode-card:hover {
+  border-color: #1890ff;
+  box-shadow: 0 10px 24px rgba(24, 144, 255, 0.16);
+  transform: translateY(-2px);
+}
+.entry-mode-card strong {
+  font-size: 20px;
+}
+.entry-mode-card span {
+  color: #64748b;
+  line-height: 1.55;
+}
+.table-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.table-picker-head p,
+.table-picker-head h2 {
+  margin: 0;
+}
+.table-picker-head p {
+  color: #6b7280;
+  font-size: 13px;
+}
+.table-picker-head h2 {
+  color: #1f2937;
+  font-size: 24px;
+}
+.table-picker-actions {
+  display: flex;
+  gap: 8px;
+}
+.table-picker-actions button {
+  border: 1px solid #d9e6ff;
+  border-radius: 6px;
+  background: #f5f9ff;
+  color: #1767c4;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.table-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  gap: 12px;
+}
+.table-choice {
+  min-height: 92px;
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2937;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+}
+.table-choice:hover {
+  border-color: #1890ff;
+  box-shadow: 0 8px 20px rgba(24, 144, 255, 0.16);
+  transform: translateY(-2px);
+}
+.table-choice strong {
+  font-size: 18px;
+}
+.table-choice span {
+  color: #6b7280;
+  font-size: 13px;
+}
+.table-picker-empty {
+  padding: 34px 12px;
+  text-align: center;
+  color: #6b7280;
 }
 .recharge-btn {
   background: #4CAF50;
@@ -1637,6 +2040,24 @@ onUnmounted(() => {
   cursor: pointer;
 }
 @media (max-width: 720px) {
+  .wallet-bar {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+  .selected-table-pill {
+    order: 3;
+    flex-basis: 100%;
+    max-width: none;
+  }
+  .table-first-overlay {
+    padding: 14px;
+  }
+  .table-first-dialog {
+    padding: 18px;
+  }
+  .entry-mode-grid {
+    grid-template-columns: 1fr;
+  }
   .favorite-list {
     grid-template-columns: 1fr;
   }
