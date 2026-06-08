@@ -139,6 +139,7 @@ export const merchantApi = {
   getDishes: () => axiosRequest.get('/admin/dishes'),
   addDish: (data) => axiosRequest.post('/admin/dishes/add', data),
   updateDish: (id, data) => axiosRequest.put(`/admin/dishes/${id}`, data),
+  updateDishStock: (id, stock) => axiosRequest.put(`/admin/dishes/${id}/stock`, null, { params: { stock } }),
   updateDishStatus: (id, status) => axiosRequest.put(`/admin/dishes/${id}/status`, null, { params: { status } }),
   deleteDish: (id) => axiosRequest.delete(`/admin/dishes/${id}`),
 

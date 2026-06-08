@@ -89,7 +89,7 @@ public class MenuService {
             item.setDescription(dish.getDetail());
             item.setCoverUrl(dish.getCoverUrl());
             item.setPrice(pkg != null && pkg.getPrice() != null ? pkg.getPrice().doubleValue() : 0);
-            item.setStatus("AVAILABLE");
+            item.setStatus(dish.getStock() == null || dish.getStock() > 0 ? "AVAILABLE" : "SOLD_OUT");
             item.setMonthlySales(pkg != null ? salesMap.getOrDefault(pkg.getId(), 0) : 0);
             item.setRecommend(dish.getIsRecommend() != null && dish.getIsRecommend() == 1);
             return item;

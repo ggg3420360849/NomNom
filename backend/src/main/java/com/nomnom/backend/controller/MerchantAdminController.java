@@ -90,7 +90,10 @@ public class MerchantAdminController {
     public ApiResponse<List<DishListResponse>> listDishes() {
         List<DishesEntity> dishes = dishesMapper.selectList(
                 new LambdaQueryWrapper<DishesEntity>()
-                        .orderByDesc(DishesEntity::getCreateTime));
+                        .orderByDesc(DishesEntity::getStatus)
+                        .orderByDesc(DishesEntity::getIsRecommend)
+                        .orderByDesc(DishesEntity::getCreateTime)
+                        .orderByDesc(DishesEntity::getId));
 
         Map<Integer, String> typeMap = typeMapper.selectList(null).stream()
                 .collect(Collectors.toMap(DishesTypeEntity::getId, t -> t.getName() != null ? t.getName() : ""));
@@ -187,6 +190,20 @@ public class MerchantAdminController {
         return ApiResponse.ok("更新成功", null);
     }
 
+    @PutMapping("/dishes/{id}/stock")
+    public ApiResponse<Void> updateDishStock(@PathVariable Integer id, @RequestParam Integer stock) {
+        if (stock == null || stock < 0) {
+            return ApiResponse.fail("库存不能小于 0");
+        }
+        DishesEntity dish = dishesMapper.selectById(id);
+        if (dish == null) {
+            return ApiResponse.fail("菜品不存在");
+        }
+        dish.setStock(stock);
+        dishesMapper.updateById(dish);
+        return ApiResponse.ok("库存已更新", null);
+    }
+
     @PutMapping("/dishes/{id}/status")
     public ApiResponse<Void> toggleDishStatus(@PathVariable Integer id, @RequestParam Integer status) {
         DishesEntity dish = dishesMapper.selectById(id);
@@ -229,6 +246,9 @@ public class MerchantAdminController {
         if (name.isEmpty()) {
             return ApiResponse.fail("分类名称不能为空");
         }
+        if (hasCategoryNameConflict(name, null)) {
+            return ApiResponse.fail("分类名称已存在");
+        }
         if (category == null) {
             category = new DishesTypeEntity();
         }
@@ -247,6 +267,9 @@ public class MerchantAdminController {
         String name = normalizeRequiredText(category != null ? category.getName() : null);
         if (name.isEmpty()) {
             return ApiResponse.fail("分类名称不能为空");
+        }
+        if (hasCategoryNameConflict(name, id)) {
+            return ApiResponse.fail("分类名称已存在");
         }
         existing.setName(name);
         existing.setIconUri(normalizeOptionalText(category.getIconUri()));
@@ -556,6 +579,14 @@ public class MerchantAdminController {
 
     @PostMapping("/tables")
     public ApiResponse<Void> addTable(@RequestBody DishesTableEntity table) {
+        String tableNumber = normalizeTableNumber(table.getNumber());
+        if (tableNumber == null) {
+            return ApiResponse.fail("桌台号不能为空");
+        }
+        if (hasTableNumberConflict(tableNumber, null)) {
+            return ApiResponse.fail("桌台号已存在");
+        }
+        table.setNumber(tableNumber);
         if (table.getStatus() == null) {
             table.setStatus(TABLE_STATUS_IDLE);
         } else if (!isValidTableStatus(table.getStatus())) {
@@ -580,7 +611,14 @@ public class MerchantAdminController {
         if (table == null) {
             return ApiResponse.fail("桌台不存在");
         }
-        table.setNumber(request.getNumber());
+        String tableNumber = normalizeTableNumber(request.getNumber());
+        if (tableNumber == null) {
+            return ApiResponse.fail("桌台号不能为空");
+        }
+        if (hasTableNumberConflict(tableNumber, id)) {
+            return ApiResponse.fail("桌台号已存在");
+        }
+        table.setNumber(tableNumber);
         table.setPersonNumber(request.getPersonNumber());
         table.setArea(null);
         table.setMinSpend(BigDecimal.ZERO);
@@ -793,6 +831,15 @@ public class MerchantAdminController {
         return value == null ? "" : value.trim();
     }
 
+    private boolean hasCategoryNameConflict(String name, Integer excludeId) {
+        LambdaQueryWrapper<DishesTypeEntity> wrapper = new LambdaQueryWrapper<DishesTypeEntity>()
+                .eq(DishesTypeEntity::getName, name);
+        if (excludeId != null) {
+            wrapper.ne(DishesTypeEntity::getId, excludeId);
+        }
+        return typeMapper.selectCount(wrapper) > 0;
+    }
+
     private String resolveOrderStatusLabel(Integer status) {
         if (status == null) {
             return "未知";
@@ -850,6 +897,22 @@ public class MerchantAdminController {
             return TABLE_STATUS_REPAIR;
         }
         return TABLE_STATUS_SEATED;
+    }
+
+    private String normalizeTableNumber(String number) {
+        if (number == null || number.trim().isEmpty()) {
+            return null;
+        }
+        return number.trim();
+    }
+
+    private boolean hasTableNumberConflict(String number, Long excludeId) {
+        LambdaQueryWrapper<DishesTableEntity> wrapper = new LambdaQueryWrapper<DishesTableEntity>()
+                .eq(DishesTableEntity::getNumber, number);
+        if (excludeId != null) {
+            wrapper.ne(DishesTableEntity::getId, excludeId);
+        }
+        return tableMapper.selectCount(wrapper) > 0;
     }
 
     private String resolveTableStatusLabel(Integer status) {

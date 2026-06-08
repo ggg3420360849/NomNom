@@ -1,8 +1,9 @@
 # NomNom 餐厅订餐系统 — API 接口文档
 
-> **版本**: v1.1  
+> **版本**: v1.2  
 > **Base URL**: `http://localhost:8080`  
-> **最后更新**: 2026-05-18
+> **前端开发地址**: `http://localhost:5173`  
+> **最后更新**: 2026-06-08
 
 ---
 
@@ -98,27 +99,24 @@ Token 有效期默认 **24 小时**。过期后需重新登录。
 | `/api/auth/register` | `POST` | 公开 |
 | `/api/menu/categories` | `GET` | 公开 |
 | `/api/menu/items` | `GET` | 公开 |
+| `/api/menu/recommend/{packageId}` | `GET` | 公开 |
 | `/api/evaluations/dish/{dishesId}` | `GET` | 公开 |
+| `/api/tables/available` | `GET` | 需登录 |
+| `/api/tables/{id}/seat` | `PUT` | 需登录 |
+| `/api/tables/{id}/release` | `PUT` | 需登录 |
 | `/api/orders/current` | `GET` | 需登录 |
 | `/api/orders/preview` | `POST` | 需登录 |
 | `/api/orders` | `POST` | 需登录 |
+| `/api/customer/tables` | `GET` | 公开 |
+| `/api/customer/**` | `*` | 需登录（`/api/customer/tables` 除外） |
 | `/api/cart/**` | `*` | 需登录 |
 | `/api/collection/**` | `*` | 需登录 |
 | `/api/evaluations/**` | `POST/PUT` | 需登录 |
 | `/api/messages/**` | `*` | 需登录 |
 | `/api/refunds/**` | `*` | 需登录（商家操作需商家角色） |
 | `/api/wallet/**` | `*` | 需登录 |
-| `/api/admin/dishes/add` | `POST` | 需商家角色 |
-| `/api/admin/tables` | `GET` | 需商家角色 |
-| `/api/admin/tables/status` | `PUT` | 需商家角色 |
-| `/api/admin/audits` | `GET` | 需商家角色 |
-| `/api/admin/audit/{id}` | `PUT` | 需商家角色 |
-| `/api/admin/finance/reconciliation` | `GET` | 需商家角色 |
-| `/api/admin/reviews` | `GET` | 需商家角色 |
-| `/api/admin/reviews/{id}/reply` | `POST` | 需商家角色 |
-| `/api/admin/reviews/{id}` | `DELETE` | 需商家角色 |
-| `/api/admin/stats` | `GET` | 需商家角色 |
-| `/api/common/upload` | `POST` | 需商家角色 |
+| `/api/admin/**` | `*` | 需商家角色 |
+| `/api/common/upload` | `POST` | 需登录 |
 | `/uploads/**` | `GET` | 公开（静态资源） |
 
 ---
@@ -357,6 +355,7 @@ GET /api/menu/items?keyword=麻辣
   "data": [
     {
       "id": 1,
+      "dishesId": 1,
       "name": "招牌毛肚 - 大份 / 麻辣",
       "category": "1",
       "categoryLabel": "火锅",
@@ -364,10 +363,12 @@ GET /api/menu/items?keyword=麻辣
       "description": "新鲜毛肚，每日空运到店",
       "coverUrl": "/uploads/abc123_maodu.jpg",
       "status": "AVAILABLE",
-      "monthlySales": 0
+      "monthlySales": 0,
+      "recommend": true
     },
     {
       "id": 2,
+      "dishesId": 1,
       "name": "招牌毛肚 - 小份 / 原味",
       "category": "1",
       "categoryLabel": "火锅",
@@ -375,7 +376,8 @@ GET /api/menu/items?keyword=麻辣
       "description": "新鲜毛肚，每日空运到店",
       "coverUrl": "/uploads/abc123_maodu.jpg",
       "status": "AVAILABLE",
-      "monthlySales": 0
+      "monthlySales": 0,
+      "recommend": false
     }
   ]
 }
@@ -384,6 +386,7 @@ GET /api/menu/items?keyword=麻辣
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `id` | `number` | 菜品套餐 ID（`dishes_package.id`） |
+| `dishesId` | `number` | 菜品 ID（`dishes.id`） |
 | `name` | `string` | 展示名称，由 菜品名 + 套餐名 + 规格 拼接 |
 | `category` | `string` | 所属分类编码 |
 | `categoryLabel` | `string` | 分类中文名 |
@@ -392,6 +395,19 @@ GET /api/menu/items?keyword=麻辣
 | `coverUrl` | `string` | 封面图路径（相对路径，需拼接 base URL） |
 | `status` | `string` | `"AVAILABLE"` = 可售，`"SOLD_OUT"` = 已下架 |
 | `monthlySales` | `number` | 月销量（当前固定为 0，预留字段） |
+| `recommend` | `boolean` | 是否为推荐菜品 |
+
+---
+
+### 5.3 查询推荐菜品
+
+```
+GET /api/menu/recommend/{packageId}
+```
+
+根据当前套餐 ID 查询关联推荐菜品，用于顾客端购物车/菜品详情中的“搭配推荐”场景。
+
+**成功响应** (200): 同 [5.2 查询菜品列表](#52-查询菜品列表)，返回 `MenuItem[]`。
 
 ---
 
@@ -571,6 +587,74 @@ Content-Type: application/json
 
 ---
 
+### 6.4 查询空闲桌台
+
+```
+GET /api/tables/available
+Authorization: Bearer <token>
+```
+
+返回状态为 `0`（空闲）的桌台，按桌台号升序排列。
+
+**成功响应** (200):
+
+```json
+{
+  "success": true,
+  "message": "success",
+  "data": [
+    {
+      "id": 1,
+      "number": "A01",
+      "personNumber": 4,
+      "status": 0,
+      "amount": 0.00,
+      "occupiedBy": null
+    }
+  ]
+}
+```
+
+---
+
+### 6.5 选择桌台
+
+```
+PUT /api/tables/{id}/seat
+Authorization: Bearer <token>
+```
+
+顾客入座指定桌台。若桌台已被当前用户占用，会直接返回“桌台已选择”；若被其他用户占用或维修中，返回 `success=false`。
+
+**成功响应**: `{ "success": true, "message": "桌台已选择", "data": { "id": 1, "status": 1, "occupiedBy": 1 } }`
+
+---
+
+### 6.6 释放桌台
+
+```
+PUT /api/tables/{id}/release
+Authorization: Bearer <token>
+```
+
+仅允许释放当前用户选择且没有消费金额的桌台。已有消费记录时不能直接换桌。
+
+**成功响应**: `{ "success": true, "message": "桌台已释放", "data": { "id": 1, "status": 0, "occupiedBy": null } }`
+
+---
+
+### 6.7 查询全部桌台（顾客兼容）
+
+```
+GET /api/customer/tables
+```
+
+公开返回所有桌台，按区域与桌台号排序。新版顾客选桌优先使用 [6.4 查询空闲桌台](#64-查询空闲桌台)。
+
+**成功响应**: 同 [6.4 查询空闲桌台](#64-查询空闲桌台)，但包含全部状态的桌台。
+
+---
+
 ## 7. 商家管理模块
 
 > 以下接口需要商家角色（`roleCode = "MERCHANT"`），请求头需携带商家 token。
@@ -592,13 +676,16 @@ Authorization: Bearer <token>
     {
       "id": 1,
       "typeId": 1,
+      "typeName": "火锅",
       "name": "招牌毛肚",
       "detail": "新鲜毛肚，每日空运到店",
       "coverUrl": "/uploads/maodu.jpg",
       "status": 1,
       "stock": 200,
-      "memberPrice": 58.00,
+      "price": 68.00,
       "specs": "{\"sizes\":[\"大份\",\"小份\"],\"spiciness\":[\"微辣\",\"中辣\",\"特辣\"]}",
+      "isRecommend": 1,
+      "recommendIds": "2,3",
       "createTime": "2026-05-14T04:15:00.000+00:00"
     }
   ]
@@ -609,13 +696,16 @@ Authorization: Bearer <token>
 |------|------|------|
 | `id` | `number` | 菜品 ID |
 | `typeId` | `number` | 分类 ID |
+| `typeName` | `string` | 分类名称 |
 | `name` | `string` | 菜品名称 |
 | `detail` | `string` | 菜品详情 |
 | `coverUrl` | `string` | 封面图路径 |
 | `status` | `number` | `1` = 上架，`0` = 下架 |
 | `stock` | `number` | 库存数量 |
-| `memberPrice` | `number \| null` | 会员价 |
+| `price` | `number` | 当前最低套餐价 |
 | `specs` | `string \| null` | 规格 JSON |
+| `isRecommend` | `number` | `1` = 推荐菜品，`0` = 普通菜品 |
+| `recommendIds` | `string \| null` | 关联推荐菜品 ID，逗号分隔 |
 | `createTime` | `string` | 创建时间 |
 
 ---
@@ -641,8 +731,9 @@ Authorization: Bearer <token>
     "coverUrl": "/uploads/maodu.jpg",
     "status": 1,
     "stock": 200,
-    "memberPrice": 58.00,
     "specs": "{\"sizes\":[\"大份\",\"小份\"]}",
+    "isRecommend": 1,
+    "recommendIds": "2,3",
     "createTime": "2026-05-14T04:15:00.000+00:00",
     "packages": [
       {
@@ -692,7 +783,8 @@ Content-Type: application/json
   "status": 1,
   "stock": 200,
   "price": 68.00,
-  "memberPrice": 58.00,
+  "isRecommend": 1,
+  "recommendIds": "2,3",
   "specs": ["大份", "小份"],
   "tastes": ["微辣", "中辣"]
 }
@@ -707,7 +799,8 @@ Content-Type: application/json
 | `status` | `number` | 否 | `1` = 上架，`0` = 下架，默认 `1` |
 | `stock` | `number` | 否 | 库存数量，默认 `999` |
 | `price` | `number` | 否 | 基础售价（同步创建默认套餐"标准份"） |
-| `memberPrice` | `number` | 否 | 会员价 |
+| `isRecommend` | `number` | 否 | `1` = 推荐菜品，`0` = 普通菜品 |
+| `recommendIds` | `string` | 否 | 关联推荐菜品 ID，逗号分隔 |
 | `specs` | `array` | 否 | 规格列表，如 `["大份", "小份"]` |
 | `tastes` | `array` | 否 | 口味列表，如 `["微辣", "中辣"]` |
 
@@ -729,7 +822,7 @@ Authorization: Bearer <token>
 Content-Type: application/json
 ```
 
-**请求体**: 与 [7.3 新增菜品](#73-新增菜品) 完全相同。注意此接口只更新 `dishes` 表，不修改已有套餐。
+**请求体**: 与 [7.3 新增菜品](#73-新增菜品) 完全相同。若传入 `price` 且大于 0，会同步更新当前菜品价格最低的一条套餐。
 
 **成功响应** (200):
 
@@ -741,6 +834,25 @@ Content-Type: application/json
 
 ```json
 { "success": false, "message": "菜品不存在", "data": null }
+```
+
+---
+
+### 7.4.1 快速修改库存
+
+```
+PUT /api/admin/dishes/{id}/stock?stock=
+Authorization: Bearer <token>
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `stock` | `number` | 是 | 新库存数量，不能小于 `0` |
+
+**成功响应** (200):
+
+```json
+{ "success": true, "message": "库存已更新", "data": null }
 ```
 
 ---
@@ -899,13 +1011,13 @@ Authorization: Bearer <token>
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `status` | `number` | 否 | 1=待支付，2=已支付，3=出餐中，4=已完成 |
+| `status` | `number` | 否 | `1`=待支付，`2`=已支付，`3`=制作中，`4`=已完成，`5`=已取消 |
 
 **成功响应**: `{ "success": true, "data": [{ "id": 1, "code": "NN...", "userId": 1, "status": 1, "totalPrice": 148.00, "createTime": "..." }] }`
 
 ---
 
-### 7.12 更新订单状态
+### 7.13 更新订单状态
 
 ```
 PUT /api/admin/orders/{id}/status?status=
@@ -914,42 +1026,96 @@ Authorization: Bearer <token>
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `status` | `number` | 是 | 目标状态值 |
+| `status` | `number` | 是 | 目标状态值：`1`=待支付，`2`=已支付，`3`=制作中，`4`=已完成，`5`=已取消 |
+
+> 更新订单状态后会同步相关桌台占用状态，并给顾客写入订单消息提醒。
+
+**成功响应**: `{ "success": true, "message": "状态更新成功", "data": null }`
 
 ---
 
-### 7.13 新增桌台
+### 7.14 清理异常订单
+
+```
+DELETE /api/admin/orders/invalid
+Authorization: Bearer <token>
+```
+
+扫描并删除缺失订单号、用户、有效状态、金额或订单项的异常订单，同时清理关联订单项、评价、评价图片和退款记录。
+
+**成功响应** (200):
+
+```json
+{
+  "success": true,
+  "message": "异常订单已清理",
+  "data": {
+    "invalidOrderIds": [12, 15],
+    "deletedOrders": 2,
+    "deletedItems": 4,
+    "deletedEvaluations": 1,
+    "deletedRefunds": 1,
+    "deletedImages": 2
+  }
+}
+```
+
+---
+
+### 7.15 新增桌台
 
 ```
 POST /api/admin/tables
 Authorization: Bearer <token>
+Content-Type: application/json
 ```
 
-**请求体**: `{ "number": "C01", "personNumber": 6, "area": "三楼", "minSpend": 200.00 }`
+**请求体**:
+
+```json
+{
+  "number": "C01",
+  "personNumber": 6,
+  "status": 0
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `number` | `string` | 是 | 桌台号，不能重复 |
+| `personNumber` | `number` | 否 | 可容纳人数 |
+| `status` | `number` | 否 | `0`=空闲，`1`=已入座，`6`=维修中；默认 `0` |
+
+> 后端会忽略前端传入的 `area` 和 `minSpend`，统一保存为空区域、最低消费 `0`。
 
 ---
 
-### 7.14 编辑桌台
+### 7.16 编辑桌台
 
 ```
 PUT /api/admin/tables/{id}
 Authorization: Bearer <token>
+Content-Type: application/json
 ```
 
-**请求体**: 同 [7.13 新增桌台](#713-新增桌台)
+**请求体**: 同 [7.15 新增桌台](#715-新增桌台)。
+
+**成功响应**: `{ "success": true, "message": "更新成功", "data": null }`
 
 ---
 
-### 7.15 删除桌台
+### 7.17 删除桌台
 
 ```
 DELETE /api/admin/tables/{id}
 Authorization: Bearer <token>
 ```
 
+**成功响应**: `{ "success": true, "message": "删除成功", "data": null }`
+
 ---
 
-### 7.16 查询桌台列表
+### 7.18 查询桌台列表
 
 ```
 GET /api/admin/tables
@@ -968,9 +1134,10 @@ Authorization: Bearer <token>
       "number": "A01",
       "personNumber": 2,
       "status": 0,
-      "area": "大厅",
+      "area": null,
       "amount": 0.00,
       "minSpend": 0.00,
+      "occupiedBy": null,
       "createTime": "2026-05-14T12:00:00"
     }
   ]
@@ -982,14 +1149,28 @@ Authorization: Bearer <token>
 | `id` | `number` | 桌台 ID |
 | `number` | `string` | 桌台编号 |
 | `personNumber` | `number` | 可容纳人数 |
-| `status` | `number` | 0=空闲，1=已入座，2=就餐中，3=已下单，4=待结账，5=预订中，6=维修中 |
-| `area` | `string` | 所属区域 |
+| `status` | `number` | `0`=空闲，`1`=已入座，`6`=维修中 |
+| `area` | `string \| null` | 当前项目保留字段，商家端创建/编辑时统一置空 |
 | `amount` | `number` | 当前消费总额 |
 | `minSpend` | `number` | 最低消费 |
+| `occupiedBy` | `number \| null` | 当前占用该桌台的用户 ID |
 
 ---
 
-### 7.8 更新桌台状态
+### 7.19 查询顾客可选桌台（商家路径）
+
+```
+GET /api/admin/customer/tables
+Authorization: Bearer <token>
+```
+
+返回当前可供顾客选择的空闲桌台。该接口主要服务商家端或旧版前端兼容场景；顾客端常用 `/api/tables/available`。
+
+**成功响应**: 同 [7.18 查询桌台列表](#718-查询桌台列表)，但仅包含 `status = 0` 的桌台。
+
+---
+
+### 7.20 更新桌台状态
 
 ```
 PUT /api/admin/tables/status?tableId=&status=
@@ -999,14 +1180,14 @@ Authorization: Bearer <token>
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `tableId` | `number` | 是 | 桌台 ID |
-| `status` | `number` | 是 | 目标状态（0=空闲，1=已入座，2=就餐中，3=已下单，4=待结账，5=预订中，6=维修中） |
+| `status` | `number` | 是 | 目标状态：`0`=空闲，`1`=已入座，`6`=维修中 |
 
-> 设为 0（空闲）、5（预订中）、6（维修中）时自动清零消费金额；顾客端仅展示 0（空闲）桌台。
+> 设为 `0`（空闲）或 `6`（维修中）时自动清零消费金额并释放占用用户。
 
 **成功响应** (200):
 
 ```json
-{ "success": true, "message": "状态更新成功", "data": null }
+{ "success": true, "message": "桌台已设为空闲", "data": null }
 ```
 
 **失败响应**:
@@ -1017,14 +1198,14 @@ Authorization: Bearer <token>
 
 ---
 
-### 7.17 审核列表
+### 7.21 审核列表
 
 ```
 GET /api/admin/audits
 Authorization: Bearer <token>
 ```
 
-> 需要商家角色。返回所有待审核的退款申请。
+> 返回退款申请及充值流水相关的审核/对账线索，按创建时间倒序排列。
 
 **成功响应** (200):
 
@@ -1036,8 +1217,9 @@ Authorization: Bearer <token>
     {
       "id": 1,
       "type": "REFUND",
-      "desc": "订单#NN20260518100000123 菜品份量太少",
-      "status": "PENDING"
+      "desc": "订单 NN20260518100000123 退款原因：菜品份量太少",
+      "status": "PENDING",
+      "createTime": "2026-05-18T10:00:00"
     }
   ]
 }
@@ -1045,25 +1227,26 @@ Authorization: Bearer <token>
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `id` | `number` | 审核项 ID |
-| `type` | `string` | 审核类型：`"REFUND"` = 退款审核 |
+| `id` | `number \| string` | 审核项 ID；退款项也可使用 `REFUND-{id}` |
+| `type` | `string` | 审核类型，如 `REFUND`、`RECHARGE` |
 | `desc` | `string` | 申请详情描述 |
-| `status` | `string` | `"PENDING"` = 待审核 |
+| `status` | `string` | `PENDING` / `APPROVED` / `REJECTED` / `NONE` |
 
 ---
 
-### 7.18 审核操作
+### 7.22 审核操作
 
 ```
-PUT /api/admin/audit/{id}?approved=
+PUT /api/admin/audit/{id}?approved=&cause=
 Authorization: Bearer <token>
 ```
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `approved` | `boolean` | 是 | `true` = 通过，`false` = 驳回 |
+| `cause` | `string` | 否 | 驳回原因；驳回退款时建议填写 |
 
-> 需要商家角色。
+> `{id}` 支持纯退款 ID 或 `REFUND-{id}`。充值流水无需审批，传入充值记录会返回 `success=false`。
 
 **成功响应**:
 
@@ -1074,7 +1257,7 @@ Authorization: Bearer <token>
 
 ---
 
-### 7.19 财务对账
+### 7.23 财务对账
 
 ```
 GET /api/admin/finance/reconciliation
@@ -1107,7 +1290,7 @@ Authorization: Bearer <token>
 
 ---
 
-### 7.20 评价列表（商家端）
+### 7.24 评价列表（商家端）
 
 ```
 GET /api/admin/reviews
@@ -1145,7 +1328,7 @@ Authorization: Bearer <token>
 
 ---
 
-### 7.21 回复评价（商家端）
+### 7.25 回复评价（商家端）
 
 ```
 POST /api/admin/reviews/{id}/reply
@@ -1169,7 +1352,7 @@ Content-Type: application/json
 
 ---
 
-### 7.22 删除评价（商家端）
+### 7.26 删除评价（商家端）
 
 ```
 DELETE /api/admin/reviews/{id}
@@ -1182,7 +1365,7 @@ Authorization: Bearer <token>
 
 ---
 
-### 7.23 统计分析
+### 7.27 统计分析
 
 ```
 GET /api/admin/stats
@@ -1538,6 +1721,79 @@ Authorization: Bearer <token>
 
 ---
 
+### 10.5 查询订单套餐（评价弹窗）
+
+```
+GET /api/customer/orders/{orderId}/packages
+Authorization: Bearer <token>
+```
+
+返回某个订单下可评价的套餐快照。顾客只能查看自己的订单，商家角色可查看所有订单。
+
+**成功响应** (200):
+
+```json
+{
+  "success": true,
+  "message": "success",
+  "data": [
+    {
+      "packageId": 1,
+      "dishesId": 1,
+      "dishName": "招牌毛肚",
+      "packageName": "大份",
+      "specs": "麻辣",
+      "coverUrl": "/uploads/maodu.jpg",
+      "price": 68.00,
+      "dishStatus": 1,
+      "stock": 200
+    }
+  ]
+}
+```
+
+---
+
+### 10.6 批量提交评价
+
+```
+POST /api/customer/comments/batch
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+用于顾客对同一订单中的多个菜品一次性提交评价。
+
+**请求体**:
+
+```json
+[
+  {
+    "dishesId": 1,
+    "ordersId": 1,
+    "ratingValue": 5,
+    "content": "非常好吃！",
+    "imageUrls": ["/uploads/eval_img1.jpg"]
+  }
+]
+```
+
+**成功响应**: `{ "success": true, "message": "评价成功", "data": null }`
+
+---
+
+### 10.7 顾客端兼容评价接口
+
+```
+POST /api/customer/comment
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+请求体同 [10.3 提交评价](#103-提交评价)，用于旧版前端或商家端调用兼容。
+
+---
+
 ## 11. 消息模块
 
 > 以下接口需要登录，请求头需携带 JWT token。
@@ -1788,7 +2044,47 @@ Authorization: Bearer <token>
 
 ---
 
+### 13.3 钱包充值
+
+```
+POST /api/wallet/recharge
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**请求体**:
+
+```json
+{
+  "amount": 100.00
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `amount` | `number` | 是 | 充值金额 |
+
+**成功响应** (200):
+
+```json
+{
+  "success": true,
+  "message": "充值成功",
+  "data": {
+    "id": 1,
+    "userId": 1,
+    "status": 1,
+    "type": 1,
+    "surplus": 100.00
+  }
+}
+```
+
+---
+
 ## 14. 文件上传模块
+
+> 上传接口需要登录，但不限定顾客或商家角色；上传后的图片通过 `/uploads/**` 公开访问。
 
 ### 14.1 上传图片
 
@@ -1844,67 +2140,81 @@ Content-Type: multipart/form-data
 | `GET` | 查询资源 |
 | `POST` | 创建资源、提交操作 |
 | `PUT` | 更新资源 |
+| `DELETE` | 删除资源或清理数据 |
 
 ### 15.3 接口总览
 
-| 序号 | 方法 | 路径 | 说明 | 权限 |
+| 模块 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|------|
-| 1 | `GET` | `/api/health` | 健康检查 | 公开 |
-| 2 | `POST` | `/api/auth/login` | 用户登录 | 公开 |
-| 3 | `POST` | `/api/auth/register` | 用户注册 | 公开 |
-| 4 | `GET` | `/api/menu/categories` | 获取菜品分类 | 公开 |
-| 5 | `GET` | `/api/menu/items` | 查询菜品列表 | 公开 |
-| 6 | `GET` | `/api/evaluations/dish/{id}` | 查看菜品评价 | 公开 |
-| 7 | `GET` | `/api/orders/current` | 查询订单 | 需登录 |
-| 8 | `POST` | `/api/orders/preview` | 订单预览 | 需登录 |
-| 9 | `POST` | `/api/orders` | 创建订单 | 需登录 |
-| 10 | `GET` | `/api/cart` | 查看购物车 | 需登录 |
-| 11 | `POST` | `/api/cart` | 加入购物车 | 需登录 |
-| 12 | `PUT` | `/api/cart/{id}/quantity` | 修改购物车数量 | 需登录 |
-| 13 | `PUT` | `/api/cart/{id}/selected` | 切换选中状态 | 需登录 |
-| 14 | `DELETE` | `/api/cart/{id}` | 移除购物车项 | 需登录 |
-| 15 | `DELETE` | `/api/cart` | 清空购物车 | 需登录 |
-| 16 | `GET` | `/api/collection` | 收藏列表 | 需登录 |
-| 17 | `GET` | `/api/collection/check` | 检查是否已收藏 | 需登录 |
-| 18 | `POST` | `/api/collection/toggle` | 切换收藏 | 需登录 |
-| 19 | `GET` | `/api/evaluations/my` | 查看我的评价 | 需登录 |
-| 20 | `POST` | `/api/evaluations` | 提交评价 | 需登录 |
-| 21 | `PUT` | `/api/evaluations/{id}/reply` | 商家回复评价 | 需商家 |
-| 22 | `GET` | `/api/messages` | 消息列表 | 需登录 |
-| 23 | `GET` | `/api/messages/unread-count` | 未读消息数 | 需登录 |
-| 24 | `PUT` | `/api/messages/{id}/read` | 标记已读 | 需登录 |
-| 25 | `PUT` | `/api/messages/read-all` | 全部已读 | 需登录 |
-| 26 | `DELETE` | `/api/messages/{id}` | 删除消息 | 需登录 |
-| 27 | `POST` | `/api/refunds` | 提交退款申请 | 需登录 |
-| 28 | `GET` | `/api/refunds/order/{id}` | 查询退款状态 | 需登录 |
-| 29 | `GET` | `/api/refunds` | 退款列表（商家） | 需商家 |
-| 30 | `PUT` | `/api/refunds/{id}/approve` | 通过退款 | 需商家 |
-| 31 | `PUT` | `/api/refunds/{id}/reject` | 拒绝退款 | 需商家 |
-| 32 | `GET` | `/api/wallet` | 查询钱包 | 需登录 |
-| 33 | `GET` | `/api/wallet/info` | 交易明细 | 需登录 |
-| 34 | `GET` | `/api/admin/dishes` | 菜品列表（商家端） | 需商家 |
-| 35 | `GET` | `/api/admin/dishes/{id}` | 菜品详情（含套餐） | 需商家 |
-| 36 | `POST` | `/api/admin/dishes/add` | 新增菜品 | 需商家 |
-| 37 | `PUT` | `/api/admin/dishes/{id}` | 编辑菜品 | 需商家 |
-| 38 | `PUT` | `/api/admin/dishes/{id}/status` | 上架/下架 | 需商家 |
-| 39 | `DELETE` | `/api/admin/dishes/{id}` | 删除菜品 | 需商家 |
-| 40 | `GET` | `/api/admin/categories` | 分类列表 | 需商家 |
-| 41 | `POST` | `/api/admin/categories` | 新增分类 | 需商家 |
-| 42 | `PUT` | `/api/admin/categories/{id}` | 编辑分类 | 需商家 |
-| 43 | `DELETE` | `/api/admin/categories/{id}` | 删除分类 | 需商家 |
-| 44 | `GET` | `/api/admin/dashboard` | 仪表盘 | 需商家 |
-| 45 | `GET` | `/api/admin/orders` | 订单列表 | 需商家 |
-| 46 | `PUT` | `/api/admin/orders/{id}/status` | 更新订单状态 | 需商家 |
-| 47 | `GET` | `/api/admin/tables` | 查询桌台 | 需商家 |
-| 48 | `POST` | `/api/admin/tables` | 新增桌台 | 需商家 |
-| 49 | `PUT` | `/api/admin/tables/{id}` | 编辑桌台 | 需商家 |
-| 50 | `DELETE` | `/api/admin/tables/{id}` | 删除桌台 | 需商家 |
-| 51 | `PUT` | `/api/admin/tables/status` | 更新桌台状态 | 需商家 |
-| 52 | `POST` | `/api/common/upload` | 上传图片 | 需商家 |
-| 53 | `GET` | `/api/admin/audits` | 审核列表 | 需商家 |
-| 54 | `PUT` | `/api/admin/audit/{id}` | 审核操作 | 需商家 |
-| 55 | `GET` | `/api/admin/finance/reconciliation` | 财务对账 | 需商家 |
-| 56 | `GET` | `/api/admin/reviews` | 评价列表（商家端） | 需商家 |
-| 57 | `POST` | `/api/admin/reviews/{id}/reply` | 回复评价（商家端） | 需商家 |
-| 58 | `DELETE` | `/api/admin/reviews/{id}` | 删除评价 | 需商家 |
-| 59 | `GET` | `/api/admin/stats` | 统计分析 | 需商家 |
+| 系统 | `GET` | `/api/health` | 健康检查 | 公开 |
+| 认证 | `POST` | `/api/auth/login` | 用户登录 | 公开 |
+| 认证 | `POST` | `/api/auth/register` | 用户注册 | 公开 |
+| 菜单 | `GET` | `/api/menu/categories` | 获取菜品分类 | 公开 |
+| 菜单 | `GET` | `/api/menu/items` | 查询菜品列表 | 公开 |
+| 菜单 | `GET` | `/api/menu/recommend/{packageId}` | 查询推荐菜品 | 公开 |
+| 桌台 | `GET` | `/api/tables/available` | 查询空闲桌台 | 需登录 |
+| 桌台 | `PUT` | `/api/tables/{id}/seat` | 选择桌台 | 需登录 |
+| 桌台 | `PUT` | `/api/tables/{id}/release` | 释放桌台 | 需登录 |
+| 桌台 | `GET` | `/api/customer/tables` | 查询全部桌台 | 公开 |
+| 订单 | `GET` | `/api/orders/current` | 查询当前用户订单 | 需登录 |
+| 订单 | `POST` | `/api/orders/preview` | 订单预览 | 需登录 |
+| 订单 | `POST` | `/api/orders` | 创建订单 | 需登录 |
+| 购物车 | `GET` | `/api/cart` | 查看购物车 | 需登录 |
+| 购物车 | `POST` | `/api/cart` | 加入购物车 | 需登录 |
+| 购物车 | `PUT` | `/api/cart/{id}/quantity` | 修改购物车数量 | 需登录 |
+| 购物车 | `PUT` | `/api/cart/{id}/selected` | 切换选中状态 | 需登录 |
+| 购物车 | `DELETE` | `/api/cart/{id}` | 移除购物车项 | 需登录 |
+| 购物车 | `DELETE` | `/api/cart` | 清空购物车 | 需登录 |
+| 收藏 | `GET` | `/api/collection` | 收藏列表 | 需登录 |
+| 收藏 | `GET` | `/api/collection/check` | 检查是否已收藏 | 需登录 |
+| 收藏 | `POST` | `/api/collection/toggle` | 切换收藏 | 需登录 |
+| 评价 | `GET` | `/api/evaluations/dish/{dishesId}` | 查看菜品评价 | 公开 |
+| 评价 | `GET` | `/api/evaluations/my` | 查看我的评价 | 需登录 |
+| 评价 | `POST` | `/api/evaluations` | 提交评价 | 需登录 |
+| 评价 | `PUT` | `/api/evaluations/{id}/reply` | 商家回复评价 | 需商家 |
+| 评价 | `GET` | `/api/customer/orders/{orderId}/packages` | 查询订单套餐 | 需登录 |
+| 评价 | `POST` | `/api/customer/comments/batch` | 批量提交评价 | 需登录 |
+| 评价 | `POST` | `/api/customer/comment` | 单个评价兼容接口 | 需登录 |
+| 消息 | `GET` | `/api/messages` | 消息列表 | 需登录 |
+| 消息 | `GET` | `/api/messages/unread-count` | 未读消息数 | 需登录 |
+| 消息 | `PUT` | `/api/messages/{id}/read` | 标记已读 | 需登录 |
+| 消息 | `PUT` | `/api/messages/read-all` | 全部已读 | 需登录 |
+| 消息 | `DELETE` | `/api/messages/{id}` | 删除消息 | 需登录 |
+| 退款 | `POST` | `/api/refunds` | 提交取消/退款申请 | 需登录 |
+| 退款 | `GET` | `/api/refunds/order/{ordersId}` | 查询退款状态 | 需登录 |
+| 退款 | `GET` | `/api/refunds` | 退款列表 | 需商家 |
+| 退款 | `PUT` | `/api/refunds/{id}/approve` | 通过退款 | 需商家 |
+| 退款 | `PUT` | `/api/refunds/{id}/reject` | 拒绝退款 | 需商家 |
+| 钱包 | `GET` | `/api/wallet` | 查询钱包 | 需登录 |
+| 钱包 | `GET` | `/api/wallet/info` | 交易明细 | 需登录 |
+| 钱包 | `POST` | `/api/wallet/recharge` | 钱包充值 | 需登录 |
+| 文件 | `POST` | `/api/common/upload` | 上传图片 | 需登录 |
+| 文件 | `GET` | `/uploads/**` | 访问上传资源 | 公开 |
+| 商家-菜品 | `GET` | `/api/admin/dishes` | 菜品列表 | 需商家 |
+| 商家-菜品 | `GET` | `/api/admin/dishes/{id}` | 菜品详情 | 需商家 |
+| 商家-菜品 | `POST` | `/api/admin/dishes/add` | 新增菜品 | 需商家 |
+| 商家-菜品 | `PUT` | `/api/admin/dishes/{id}` | 编辑菜品 | 需商家 |
+| 商家-菜品 | `PUT` | `/api/admin/dishes/{id}/stock` | 快速修改库存 | 需商家 |
+| 商家-菜品 | `PUT` | `/api/admin/dishes/{id}/status` | 上架/下架 | 需商家 |
+| 商家-菜品 | `DELETE` | `/api/admin/dishes/{id}` | 删除菜品 | 需商家 |
+| 商家-分类 | `GET` | `/api/admin/categories` | 分类列表 | 需商家 |
+| 商家-分类 | `POST` | `/api/admin/categories` | 新增分类 | 需商家 |
+| 商家-分类 | `PUT` | `/api/admin/categories/{id}` | 编辑分类 | 需商家 |
+| 商家-分类 | `DELETE` | `/api/admin/categories/{id}` | 删除分类 | 需商家 |
+| 商家-订单 | `GET` | `/api/admin/dashboard` | 仪表盘 | 需商家 |
+| 商家-订单 | `GET` | `/api/admin/orders` | 订单列表 | 需商家 |
+| 商家-订单 | `PUT` | `/api/admin/orders/{id}/status` | 更新订单状态 | 需商家 |
+| 商家-订单 | `DELETE` | `/api/admin/orders/invalid` | 清理异常订单 | 需商家 |
+| 商家-桌台 | `GET` | `/api/admin/tables` | 查询桌台 | 需商家 |
+| 商家-桌台 | `GET` | `/api/admin/customer/tables` | 查询顾客可选桌台 | 需商家 |
+| 商家-桌台 | `POST` | `/api/admin/tables` | 新增桌台 | 需商家 |
+| 商家-桌台 | `PUT` | `/api/admin/tables/{id}` | 编辑桌台 | 需商家 |
+| 商家-桌台 | `DELETE` | `/api/admin/tables/{id}` | 删除桌台 | 需商家 |
+| 商家-桌台 | `PUT` | `/api/admin/tables/status` | 更新桌台状态 | 需商家 |
+| 商家-审核 | `GET` | `/api/admin/audits` | 审核列表 | 需商家 |
+| 商家-审核 | `PUT` | `/api/admin/audit/{id}` | 审核操作 | 需商家 |
+| 商家-财务 | `GET` | `/api/admin/finance/reconciliation` | 财务对账 | 需商家 |
+| 商家-评价 | `GET` | `/api/admin/reviews` | 评价列表 | 需商家 |
+| 商家-评价 | `POST` | `/api/admin/reviews/{id}/reply` | 回复评价 | 需商家 |
+| 商家-评价 | `DELETE` | `/api/admin/reviews/{id}` | 删除评价 | 需商家 |
+| 商家-统计 | `GET` | `/api/admin/stats` | 统计分析 | 需商家 |

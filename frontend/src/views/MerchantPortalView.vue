@@ -78,6 +78,7 @@ const filteredTables = computed(() => tableList.value)
 const showDishModal = ref(false)
 const editingId = ref(null)
 const dishList = ref([])
+const stockSavingIds = ref(new Set())
 const dishForm = reactive({
   name: '', type_id: null, price: 0, stock: 99, status: 1, cover_url: '', isRecommend: 0,
   recommend_ids: []
@@ -113,7 +114,7 @@ function openEditModal(dish) {
 
   Object.assign(dishForm, {
     name: dish.name || '', type_id: dish.typeId || null, price: dish.price || 0,
-    stock: dish.stock || 99, status: dish.status ?? 1, cover_url: dish.coverUrl || '', isRecommend: dish.isRecommend || 0,
+    stock: dish.stock ?? 99, status: dish.status ?? 1, cover_url: dish.coverUrl || '', isRecommend: dish.isRecommend || 0,
     recommend_ids: parsedRecs // 绑定解析出来的真实数组，复选框就会自动亮起！
   })
   showDishModal.value = true
@@ -149,7 +150,7 @@ async function saveCategory() {
     if (editingCategoryId.value) await merchantApi.updateCategory(editingCategoryId.value, categoryForm)
     else await merchantApi.addCategory(categoryForm)
     showToast('分类维护成功'); editingCategoryId.value = null; categoryForm.name = ''; await fetchCategories()
-  } catch (err) { showToast('操作失败') }
+  } catch (err) { showToast(getErrorMessage(err, '操作失败')) }
 }
 
 async function quickAddCategory(presetName) {
@@ -158,14 +159,67 @@ async function quickAddCategory(presetName) {
     showToast(`分类「${presetName}」已写入数据库！`);
     await fetchCategories();
   } catch (err) {
-    showToast('快捷添加失败');
+    showToast(getErrorMessage(err, '快捷添加失败'));
   }
 }
 
 function editCategory(cat) { editingCategoryId.value = cat.id; categoryForm.name = cat.name; categoryForm.iconUri = cat.iconUri; }
 async function removeCategory(cat) { try { await merchantApi.deleteCategory(cat.id); await fetchCategories() } catch { showToast('删除失败') } }
 
-async function fetchDishes() { try { const res = await merchantApi.getDishes(); dishList.value = res.data?.data || res.data || [] } catch {} }
+function normalizeDishRow(dish) {
+  const stock = Number(dish.stock ?? 0)
+  return {
+    ...dish,
+    stock: Number.isFinite(stock) ? stock : 0,
+    _stockOriginal: Number.isFinite(stock) ? stock : 0,
+  }
+}
+
+async function fetchDishes() {
+  try {
+    const res = await merchantApi.getDishes()
+    dishList.value = (res.data?.data || res.data || []).map(normalizeDishRow)
+  } catch {}
+}
+
+function markStockSaving(id, saving) {
+  const next = new Set(stockSavingIds.value)
+  if (saving) next.add(id)
+  else next.delete(id)
+  stockSavingIds.value = next
+}
+
+async function commitDishStock(dish) {
+  if (dish.stock === '' || dish.stock == null) {
+    dish.stock = dish._stockOriginal ?? 0
+    showToast('库存请输入不小于 0 的数字')
+    return
+  }
+
+  const parsed = Number(dish.stock)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    dish.stock = dish._stockOriginal ?? 0
+    showToast('库存请输入不小于 0 的数字')
+    return
+  }
+
+  const nextStock = Math.trunc(parsed)
+  dish.stock = nextStock
+  if (nextStock === dish._stockOriginal) return
+
+  markStockSaving(dish.id, true)
+  try {
+    await merchantApi.updateDishStock(dish.id, nextStock)
+    dish._stockOriginal = nextStock
+    showToast(`${dish.name} 库存已更新为 ${nextStock} 份`)
+  } catch (err) {
+    dish.stock = dish._stockOriginal ?? 0
+    showToast(getErrorMessage(err, '库存更新失败'))
+  } finally {
+    markStockSaving(dish.id, false)
+  }
+}
+
 async function toggleDishStatus(dish) { try { await merchantApi.updateDishStatus(dish.id, dish.status === 1 ? 0 : 1); await fetchDishes(); } catch { showToast('状态修改失败') } }
 async function removeDish(dish) { try { await merchantApi.deleteDish(dish.id); await fetchDishes() } catch { showToast('删除失败') } }
 
@@ -347,7 +401,16 @@ const tableForm = reactive({ number: '', personNumber: 2, minSpend: 0, status: 0
 const showTableForm = ref(false); const editingTableId = ref(null);
 function openAddTable() { editingTableId.value = null; Object.assign(tableForm, { number: '', personNumber: 2, minSpend: 0, status: 0 }); showTableForm.value = true; }
 function openEditTable(table) { editingTableId.value = table.id; Object.assign(tableForm, { number: table.number, personNumber: table.seats, minSpend: table.minSpend || 0, status: table.status }); showTableForm.value = true }
-async function saveTable() { try { if (editingTableId.value) await merchantApi.updateTable(editingTableId.value, tableForm); else await merchantApi.addTable(tableForm); showTableForm.value = false; await fetchTables(); } catch { } }
+async function saveTable() {
+  try {
+    if (editingTableId.value) await merchantApi.updateTable(editingTableId.value, tableForm)
+    else await merchantApi.addTable(tableForm)
+    showTableForm.value = false
+    await fetchTables()
+  } catch (err) {
+    showToast(getErrorMessage(err, '桌台保存失败'))
+  }
+}
 async function removeTable(table) { try { await merchantApi.deleteTable(table.id); await fetchTables(); } catch { } }
 
 const activeReview = ref(null); const inputReplyText = ref(''); const showReplyModal = ref(false);
@@ -435,7 +498,7 @@ onUnmounted(() => {
 
           <table v-if="subTab === 'list'" class="biz-table">
             <thead>
-            <tr><th>菜品信息</th><th>分类</th><th>售价</th><th>属性标</th><th>状态</th><th>操作</th></tr>
+            <tr><th>菜品信息</th><th>分类</th><th>售价</th><th>库存</th><th>属性标</th><th>状态</th><th>操作</th></tr>
             </thead>
             <tbody>
             <tr v-for="item in dishList" :key="item.id">
@@ -448,6 +511,21 @@ onUnmounted(() => {
               <td>{{ item.typeName || '-' }}</td>
               <td>
                 <p class="sell-price">￥{{ Number(item.price || 0).toFixed(2) }}</p>
+              </td>
+              <td>
+                <div class="stock-editor">
+                  <input
+                    v-model.number="item.stock"
+                    type="number"
+                    min="0"
+                    step="1"
+                    :disabled="stockSavingIds.has(item.id)"
+                    @blur="commitDishStock(item)"
+                    @keydown.enter.prevent="$event.target.blur()"
+                  />
+                  <span>份</span>
+                  <small v-if="stockSavingIds.has(item.id)">保存中</small>
+                </div>
               </td>
               <td>
                 <span v-if="item.isRecommend === 1" class="chip chip-orange">👍店长推荐</span>
@@ -665,6 +743,7 @@ onUnmounted(() => {
             <div class="form-group span-2"><label>名称</label><input type="text" v-model="dishForm.name" /></div>
             <div class="form-group"><label>所属分类</label><select v-model.number="dishForm.type_id" style="padding:8px 12px;border:1px solid #e0d4c3;border-radius:6px"><option :value="null">选择分类</option><option v-for="cat in categoryList" :key="cat.id" :value="cat.id">{{ cat.name }}</option></select></div>
             <div class="form-group"><label>基础售价(元)</label><input type="number" v-model="dishForm.price" /></div>
+            <div class="form-group"><label>库存(份)</label><input type="number" min="0" step="1" v-model.number="dishForm.stock" /></div>
 
             <div class="form-group span-2">
               <label style="display:flex; align-items:center; gap:8px; cursor: pointer; color: #4e342e; background: #fff8eb; padding: 12px; border-radius: 6px; border: 1px dashed #f57c00;">
@@ -680,6 +759,7 @@ onUnmounted(() => {
                     v-for="dish in dishList.filter(d => d.id !== editingId)"
                     :key="dish.id"
                     class="recommend-checkbox"
+                    :title="dish.name"
                 >
                   <input
                       type="checkbox"
@@ -689,6 +769,7 @@ onUnmounted(() => {
                   <img :src="dish.coverUrl || dish.cover_url || '/placeholder.png'" class="rc-img" />
                   <div class="rc-info">
                     <span class="rc-name">{{ dish.name }}</span>
+                    <span class="rc-category">{{ dish.typeName || '未分类' }}</span>
                     <span class="rc-price">￥{{ Number(dish.price || 0).toFixed(2) }}</span>
                   </div>
                 </label>
@@ -848,6 +929,12 @@ onUnmounted(() => {
 .dish-img { width: 48px; height: 48px; border-radius: 6px; object-fit: cover; }
 .dish-name { font-weight: bold; margin: 0; }
 .sell-price { color: #d84315; font-weight: bold; margin: 0; font-size: 16px;}
+.stock-editor { display: flex; align-items: center; gap: 6px; min-width: 132px; }
+.stock-editor input { width: 78px; height: 34px; padding: 0 8px; border: 1px solid #e0d4c3; border-radius: 6px; color: #4e342e; background: #fff; }
+.stock-editor input:focus { outline: none; border-color: #f57c00; box-shadow: 0 0 0 3px rgba(245, 124, 0, 0.12); }
+.stock-editor input:disabled { background: #f7f1e8; color: #8d6e63; cursor: wait; }
+.stock-editor span { color: #8d6e63; font-size: 13px; white-space: nowrap; }
+.stock-editor small { color: #f57c00; font-size: 12px; white-space: nowrap; }
 .chip { padding: 4px 10px; border-radius: 12px; font-size: 12px; display: inline-block;}
 .chip-green { background: #f1f8e9; color: #558b2f; border: 1px solid #c5e1a5; }
 .chip-gray { background: #f5f5f5; color: #9e9e9e; border: 1px solid #eeeeee; }
@@ -912,13 +999,14 @@ onUnmounted(() => {
 .audit-reject-textarea { min-height: 96px; padding: 10px 12px; border: 1px solid #e0d4c3; border-radius: 6px; resize: vertical; color: #4e342e; }
 .audit-reject-textarea:focus { outline: none; border-color: #f57c00; }
 
-.recommend-select-box { display: flex; flex-wrap: wrap; gap: 10px; max-height: 200px; overflow-y: auto; border: 1px solid #f0e6d2; border-radius: 6px; padding: 10px; background: white; }
-.recommend-checkbox { display: flex; align-items: center; gap: 8px; padding: 8px; background: #f9f5f0; border: 1px solid #e0d4c3; border-radius: 6px; cursor: pointer; transition: 0.2s; width: calc(50% - 5px); box-sizing: border-box; }
+.recommend-select-box { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; max-height: 240px; overflow-y: auto; border: 1px solid #f0e6d2; border-radius: 6px; padding: 10px; background: white; }
+.recommend-checkbox { display: grid; grid-template-columns: 18px 52px minmax(0, 1fr); align-items: center; gap: 10px; min-height: 72px; padding: 10px; background: #f9f5f0; border: 1px solid #e0d4c3; border-radius: 6px; cursor: pointer; transition: 0.2s; box-sizing: border-box; }
 .recommend-checkbox:hover { border-color: #f57c00; background: #fff8eb; }
 .recommend-checkbox input { margin: 0; cursor: pointer; }
-.rc-img { width: 40px; height: 40px; border-radius: 4px; object-fit: cover; }
-.rc-info { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
-.rc-name { font-size: 13px; color: #4e342e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: bold; margin-bottom: 2px; }
+.rc-img { width: 52px; height: 52px; border-radius: 4px; object-fit: cover; }
+.rc-info { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.rc-name { font-size: 13px; color: #4e342e; white-space: normal; overflow: hidden; text-overflow: ellipsis; font-weight: bold; line-height: 1.35; margin-bottom: 2px; }
+.rc-category { font-size: 11px; color: #8d6e63; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
 .rc-price { font-size: 12px; color: #d84315; font-weight: bold; }
 
 .modal-footer { padding: 16px 24px; border-top: 1px solid #f0e6d2; text-align: right; display: flex; justify-content: flex-end; gap: 12px; background: #fbf6ec; position: sticky; bottom: 0;}

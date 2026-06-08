@@ -145,16 +145,6 @@ async function submitRegister() {
           <span>密码</span>
           <input v-model="app.registerForm.password" type="password" placeholder="至少 6 位" autocomplete="new-password" />
         </label>
-        <div class="field-row">
-          <label>
-            <span>邮箱</span>
-            <input v-model="app.registerForm.email" type="email" placeholder="可选" autocomplete="email" />
-          </label>
-          <label>
-            <span>手机号</span>
-            <input v-model="app.registerForm.phone" type="text" placeholder="可选" autocomplete="tel" />
-          </label>
-        </div>
 
         <button class="submit-button" type="submit" :disabled="app.authLoading.value">
           {{ app.authLoading.value ? '正在创建...' : '创建并进入' }}

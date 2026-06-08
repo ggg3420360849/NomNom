@@ -2,6 +2,7 @@ package com.nomnom.backend.config;
 
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -13,6 +14,7 @@ import java.sql.SQLException;
 import java.util.Locale;
 
 @Component
+@Order(0)
 public class DatabaseSchemaInitializer implements ApplicationRunner {
 
     private final DataSource dataSource;
