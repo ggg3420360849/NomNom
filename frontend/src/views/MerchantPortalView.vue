@@ -3,6 +3,7 @@ import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import PortalHeader from '../components/PortalHeader.vue'
 import { useNomNomApp } from '../utils/useNomNomApp'
+import { normalizeImageUrls } from '../utils/images'
 import { merchantApi } from '../services/api'
 
 const router = useRouter()
@@ -289,6 +290,7 @@ async function fetchReviews() {
       user: item.userName || '顾客',
       rating: item.ratingValue || 0,
       reply: item.replyContent || '',
+      imageUrls: normalizeImageUrls(item.imageUrls),
     }))
   } catch { }
 }
@@ -708,7 +710,21 @@ onUnmounted(() => {
               <tbody>
               <tr v-if="reviewList.length===0"><td colspan="5" style="text-align:center; color:#999;">暂无评价</td></tr>
               <tr v-for="r in reviewList" :key="r.id"><td>{{ r.user }}</td><td>{{ r.dishName || '-' }}</td><td style="color: #f57c00;">{{ '★'.repeat(r.rating) }}</td>
-                <td>{{ r.content }} <p v-if="r.reply" style="color:#f57c00; font-size:12px;">↩ 回复：{{ r.reply }}</p><small v-if="r.orderNo" style="color:#999;">订单：{{ r.orderNo }}</small></td>
+                <td>
+                  {{ r.content }}
+                  <div v-if="r.imageUrls?.length" class="review-images">
+                    <img
+                      v-for="(url, index) in r.imageUrls"
+                      :key="`${r.id}-${url}`"
+                      :src="url"
+                      :alt="`${r.dishName || '评价'}图片${index + 1}`"
+                      class="review-image"
+                      loading="lazy"
+                    />
+                  </div>
+                  <p v-if="r.reply" style="color:#f57c00; font-size:12px;">↩ 回复：{{ r.reply }}</p>
+                  <small v-if="r.orderNo" style="color:#999;">订单：{{ r.orderNo }}</small>
+                </td>
                 <td><button class="btn-link" @click="openReplyDialog(r)">回复</button><button class="btn-link danger" @click="deleteReviewItem(r.id)">删除</button></td>
               </tr>
               </tbody>
@@ -939,6 +955,8 @@ onUnmounted(() => {
 .chip-green { background: #f1f8e9; color: #558b2f; border: 1px solid #c5e1a5; }
 .chip-gray { background: #f5f5f5; color: #9e9e9e; border: 1px solid #eeeeee; }
 .chip-orange { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+.review-images { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.review-image { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid #f0e6d2; background: #fbf6ec; }
 .visual-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 20px; }
 .table-card { border-radius: 10px; padding: 16px; border-top: 5px solid #e0d4c3; background: #fffcf8; transition: 0.3s; position: relative; display: flex; flex-direction: column; min-height: 142px; box-shadow: 0 2px 8px rgba(121, 85, 72, 0.05);}
 .table-card:hover { transform: translateY(-4px); box-shadow: 0 10px 20px rgba(121, 85, 72, 0.1); }

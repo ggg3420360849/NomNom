@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PortalHeader from '../components/PortalHeader.vue'
 import { useNomNomApp } from '../utils/useNomNomApp'
+import { normalizeImageUrls } from '../utils/images'
 import { customerApi, fetchAvailableTables } from '../services/api'
 import axios from 'axios'
 
@@ -142,7 +143,10 @@ async function openDetail(item) {
   }
   try {
     const res = await http.get(`/evaluations/dish/${item.dishesId || item.id}`)
-    detailEvaluations.value = res.data.data || []
+    detailEvaluations.value = (res.data.data || []).map(ev => ({
+      ...ev,
+      imageUrls: normalizeImageUrls(ev.imageUrls)
+    }))
   } catch {
     detailEvaluations.value = []
   }
@@ -999,6 +1003,16 @@ onUnmounted(() => {
           <div v-for="ev in detailEvaluations" :key="ev.id" class="evaluation-line">
             <strong>{{ '★'.repeat(ev.ratingValue || 0) }}</strong>
             <span>{{ ev.content }}</span>
+            <div v-if="ev.imageUrls?.length" class="evaluation-images">
+              <img
+                v-for="(url, index) in ev.imageUrls"
+                :key="`${ev.id}-${url}`"
+                :src="url"
+                :alt="`${ev.dishName || '评价'}图片${index + 1}`"
+                class="evaluation-image"
+                loading="lazy"
+              />
+            </div>
             <small v-if="ev.replyContent">商家回复：{{ ev.replyContent }}</small>
           </div>
         </div>
@@ -1956,6 +1970,19 @@ onUnmounted(() => {
 }
 .evaluation-line small {
   color: #666;
+}
+.evaluation-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.evaluation-image {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #eee;
+  background: #f7f7f7;
 }
 .modal-buttons {
   display: flex;
